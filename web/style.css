@@ -118,3 +118,7 @@ label > input, label > select { color: var(--text); font-size: 14px; }
 .doc pre { background: var(--bg); padding: 8px; border-radius: 6px; overflow: auto; }
 .doc blockquote { border-left: 3px solid var(--line); margin: 4px 0; padding-left: 10px; color: var(--muted); }
 .doc-h { font-size: 15px; color: var(--text); margin: 10px 0 4px; }
+.inline-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.lang { font-size: 12px; padding: 2px 6px; }
+.sso label { margin-bottom: 8px; }
+.sso .inline label { flex: 1; }

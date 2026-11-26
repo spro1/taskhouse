@@ -1,19 +1,20 @@
 import { useEffect, useState } from 'react'
 import { api, CATEGORY_NAMES, message, type Project, type Ref, type Status } from './api.ts'
 import { toast, type Me } from './App.tsx'
+import { lang, LANGS, setLang, t, type Lang } from './i18n.ts'
 
-const ROLE_NAMES: Record<string, string> = { viewer: '열람자', reporter: '보고자', member: '멤버', admin: '관리자' }
+const ROLES = ['viewer', 'reporter', 'member', 'admin'] as const
 
 export function Settings({ project, reload, me }: { project: Project; reload: () => void; me: Me }) {
-  const act = (p: Promise<unknown>, ok = '저장했습니다.') => p.then(() => { toast(ok); reload() }, (e) => toast(message(e)))
+  const act = (p: Promise<unknown>, ok = t('common.saved')) => p.then(() => { toast(ok); reload() }, (e) => toast(message(e)))
   return (
     <div className="settings">
       <section>
-        <h3>공개 범위</h3>
+        <h3>{t('settings.visibility')}</h3>
         <select value={project.visibility} onChange={(e) => act(api('PATCH', `/api/projects/${project.key}`, { visibility: e.target.value }))}>
-          <option value="private">비공개 (역할이 있는 사람만)</option>
-          <option value="view">모두 보기 (로그인한 모두가 열람)</option>
-          <option value="edit">모두 편집 (로그인한 모두가 멤버)</option>
+          <option value="private">{t('vis.private.long')}</option>
+          <option value="view">{t('vis.view.long')}</option>
+          <option value="edit">{t('vis.edit.long')}</option>
         </select>
       </section>
       {/* Keyed by the saved data, so after a save the editors start again from what the server has (with real ids). */}
@@ -21,11 +22,11 @@ export function Settings({ project, reload, me }: { project: Project; reload: ()
       <Workflow key={JSON.stringify([project.statuses, (project as any).transitions])} project={project} act={act} />
       {me.isAdmin && <Webhooks project={project} />}
       <section>
-        <h3>내보내기</h3>
-        <p className="muted">이슈, 설명, 댓글, 링크, 변경 이력, 스프린트를 담습니다. 첨부 파일 자체는 백업에 들어 있습니다.</p>
+        <h3>{t('export.title')}</h3>
+        <p className="muted">{t('export.sub')}</p>
         <div className="inline">
-          <a className="button" href={`/api/projects/${project.key}/export?format=json`} download>JSON (전체)</a>
-          <a className="button" href={`/api/projects/${project.key}/export?format=csv`} download>CSV (이슈 목록)</a>
+          <a className="button" href={`/api/projects/${project.key}/export?format=json`} download>{t('export.json')}</a>
+          <a className="button" href={`/api/projects/${project.key}/export?format=csv`} download>{t('export.csv')}</a>
         </div>
       </section>
     </div>
@@ -46,14 +47,14 @@ function Roles({ project, act, me }: { project: Project; act: (p: Promise<unknow
   }
   return (
     <section>
-      <h3>역할</h3>
+      <h3>{t('roles.title')}</h3>
       <ul className="list">
         {rows.map((r, i) => (
           <li key={i}>
-            {r.user ? r.user.name : `그룹 ${r.group!.name}`}
+            {r.user ? r.user.name : t('roles.group', { name: r.group!.name })}
             <span className="grow" />
             <select value={r.role} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, role: e.target.value } : x)))}>
-              {Object.entries(ROLE_NAMES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              {ROLES.map((k) => <option key={k} value={k}>{t(`role.${k}`)}</option>)}
             </select>
             <button className="ghost" disabled={r.user?.id === me.id} onClick={() => setRows(rows.filter((_, j) => j !== i))}>×</button>
           </li>
@@ -61,12 +62,12 @@ function Roles({ project, act, me }: { project: Project; act: (p: Promise<unknow
       </ul>
       <div className="inline">
         <select value={pick} onChange={(e) => setPick(e.target.value)}>
-          <option value="">사람 또는 그룹 추가…</option>
+          <option value="">{t('roles.pick')}</option>
           {users.map((u) => <option key={`u${u.id}`} value={`u:${u.id}`}>{u.name}</option>)}
-          {groups.map((g) => <option key={`g${g.id}`} value={`g:${g.id}`}>그룹: {g.name}</option>)}
+          {groups.map((g) => <option key={`g${g.id}`} value={`g:${g.id}`}>{t('roles.group', { name: g.name })}</option>)}
         </select>
-        <button onClick={add} disabled={!pick}>추가</button>
-        <button className="primary" onClick={() => act(api('PUT', `/api/projects/${project.key}/roles`, { roles: rows.map((r) => ({ user: r.user?.id, group: r.group?.id, role: r.role })) }))}>역할 저장</button>
+        <button onClick={add} disabled={!pick}>{t('common.add')}</button>
+        <button className="primary" onClick={() => act(api('PUT', `/api/projects/${project.key}/roles`, { roles: rows.map((r) => ({ user: r.user?.id, group: r.group?.id, role: r.role })) }))}>{t('roles.save')}</button>
       </div>
     </section>
   )
@@ -77,29 +78,29 @@ type Rules = { conditions?: { kind: string; level?: number }[]; validators?: { k
 type Move = { name: string; from: string | null; to: string; rules: Rules }
 // The rule kinds the server knows (server/issues.ts), as checkboxes.
 const CHECKS: { label: string; group: keyof Rules; has: (r: Rules) => boolean; toggle: (r: Rules, on: boolean) => Rules }[] = [
-  ...([['담당자만', 'is_assignee'], ['보고자만', 'is_reporter']] as const).map(([label, kind]) => ({
+  ...([[t('rule.assignee'), 'is_assignee'], [t('rule.reporter'), 'is_reporter']] as const).map(([label, kind]) => ({
     label, group: 'conditions' as const, has: (r: Rules) => !!r.conditions?.some((c) => c.kind === kind),
     toggle: (r: Rules, on: boolean) => ({ ...r, conditions: [...(r.conditions ?? []).filter((c) => c.kind !== kind), ...(on ? [{ kind }] : [])] }),
   })),
-  { label: '프로젝트 관리자만', group: 'conditions', has: (r) => !!r.conditions?.some((c) => c.kind === 'has_role'),
+  { label: t('rule.admin'), group: 'conditions', has: (r) => !!r.conditions?.some((c) => c.kind === 'has_role'),
     toggle: (r, on) => ({ ...r, conditions: [...(r.conditions ?? []).filter((c) => c.kind !== 'has_role'), ...(on ? [{ kind: 'has_role', level: 4 }] : [])] }) },
-  ...([['포인트 필수', 'points'], ['담당자 필수', 'assignee'], ['기한 필수', 'due']] as const).map(([label, field]) => ({
+  ...([[t('rule.needPoints'), 'points'], [t('rule.needAssignee'), 'assignee'], [t('rule.needDue'), 'due']] as const).map(([label, field]) => ({
     label, group: 'validators' as const, has: (r: Rules) => !!r.validators?.some((v) => v.kind === 'required' && v.fields?.includes(field)),
     toggle: (r: Rules, on: boolean) => {
       const fields = [...new Set([...(r.validators?.find((v) => v.kind === 'required')?.fields ?? []).filter((f) => f !== field), ...(on ? [field] : [])])]
       return { ...r, validators: [...(r.validators ?? []).filter((v) => v.kind !== 'required'), ...(fields.length ? [{ kind: 'required', fields }] : [])] }
     },
   })),
-  ...([['하위 작업 모두 완료', 'subtasks_done'], ['차단 이슈 없음', 'no_blockers']] as const).map(([label, kind]) => ({
+  ...([[t('rule.subtasksDone'), 'subtasks_done'], [t('rule.noBlockers'), 'no_blockers']] as const).map(([label, kind]) => ({
     label, group: 'validators' as const, has: (r: Rules) => !!r.validators?.some((v) => v.kind === kind),
     toggle: (r: Rules, on: boolean) => ({ ...r, validators: [...(r.validators ?? []).filter((v) => v.kind !== kind), ...(on ? [{ kind }] : [])] }),
   })),
-  ...([['보고자에게 할당', '$reporter'], ['나에게 할당', '$me'], ['담당자 비우기', '$none']] as const).map(([label, value]) => ({
+  ...([[t('rule.toReporter'), '$reporter'], [t('rule.toMe'), '$me'], [t('rule.unassign'), '$none']] as const).map(([label, value]) => ({
     label, group: 'post' as const, has: (r: Rules) => !!r.post?.some((p) => p.field === 'assignee' && p.value === value),
     toggle: (r: Rules, on: boolean) => ({ ...r, post: [...(r.post ?? []).filter((p) => p.field !== 'assignee'), ...(on ? [{ kind: 'set', field: 'assignee', value }] : [])] }),
   })),
 ]
-const GROUP_NAMES = { conditions: '누가', validators: '조건', post: '이동 후' }
+const GROUP_NAMES = { conditions: t('rule.who'), validators: t('rule.when'), post: t('rule.after') }
 
 // Transitions refer to statuses by row key while editing, so renaming a status keeps its transitions.
 function Workflow({ project, act }: { project: Project; act: (p: Promise<unknown>) => void }) {
@@ -120,37 +121,37 @@ function Workflow({ project, act }: { project: Project; act: (p: Promise<unknown
   }))
   return (
     <section>
-      <h3>상태</h3>
-      <p className="muted">보드의 열 순서입니다. 차트와 스프린트 완료 판정은 이름이 아니라 범주를 봅니다.</p>
+      <h3>{t('workflow.statuses')}</h3>
+      <p className="muted">{t('workflow.statuses.sub')}</p>
       <ul className="list">
         {rows.map((r, i) => (
           <li key={r.key}>
-            <input value={r.name} onChange={(e) => set(i, { name: e.target.value })} aria-label="상태 이름" />
-            <select value={r.category} onChange={(e) => set(i, { category: Number(e.target.value) as 0 | 1 | 2 })} aria-label="범주">
+            <input value={r.name} onChange={(e) => set(i, { name: e.target.value })} aria-label={t('workflow.statusName')} />
+            <select value={r.category} onChange={(e) => set(i, { category: Number(e.target.value) as 0 | 1 | 2 })} aria-label={t('workflow.category')}>
               {CATEGORY_NAMES.map((n, c) => <option key={c} value={c}>{n}</option>)}
             </select>
-            <button className="ghost" onClick={() => up(i)} aria-label="위로">↑</button>
-            <button className="ghost" onClick={() => drop(i)} aria-label="삭제">×</button>
+            <button className="ghost" onClick={() => up(i)} aria-label={t('workflow.up')}>↑</button>
+            <button className="ghost" onClick={() => drop(i)} aria-label={t('common.delete')}>×</button>
           </li>
         ))}
       </ul>
-      <button onClick={() => setRows([...rows, { key: `n${Date.now()}`, name: '', category: 1 }])}>상태 추가</button>
+      <button onClick={() => setRows([...rows, { key: `n${Date.now()}`, name: '', category: 1 }])}>{t('workflow.addStatus')}</button>
 
-      <h3 style={{ marginTop: 20 }}>전이 규칙</h3>
-      <p className="muted">{moves.length ? '아래에 적은 이동만 허용합니다.' : '규칙이 없으면 어느 상태로든 이동할 수 있습니다. 규칙을 하나라도 추가하면 적은 이동만 허용합니다.'}</p>
+      <h3 style={{ marginTop: 20 }}>{t('workflow.transitions')}</h3>
+      <p className="muted">{moves.length ? t('workflow.onlyListed') : t('workflow.free')}</p>
       {moves.map((m, i) => (
         <div key={i} className="move">
           <div className="inline">
-            <input placeholder="이름 (비우면 도착 상태 이름)" value={m.name} onChange={(e) => setMove(i, { name: e.target.value })} />
-            <select value={m.from ?? ''} onChange={(e) => setMove(i, { from: e.target.value || null })} aria-label="출발 상태">
-              <option value="">어느 상태에서든</option>
+            <input placeholder={t('workflow.moveName')} aria-label={t('workflow.moveName')} value={m.name} onChange={(e) => setMove(i, { name: e.target.value })} />
+            <select value={m.from ?? ''} onChange={(e) => setMove(i, { from: e.target.value || null })} aria-label={t('workflow.from')}>
+              <option value="">{t('workflow.fromAny')}</option>
               {rows.map((r) => <option key={r.key} value={r.key}>{r.name}</option>)}
             </select>
             →
-            <select value={m.to} onChange={(e) => setMove(i, { to: e.target.value })} aria-label="도착 상태">
+            <select value={m.to} onChange={(e) => setMove(i, { to: e.target.value })} aria-label={t('workflow.to')}>
               {rows.map((r) => <option key={r.key} value={r.key}>{r.name}</option>)}
             </select>
-            <button className="ghost" onClick={() => setMoves(moves.filter((_, j) => j !== i))} aria-label="전이 삭제">×</button>
+            <button className="ghost" onClick={() => setMoves(moves.filter((_, j) => j !== i))} aria-label={t('workflow.deleteMove')}>×</button>
           </div>
           {(Object.keys(GROUP_NAMES) as (keyof Rules)[]).map((g) => (
             <div key={g} className="checks">
@@ -165,8 +166,8 @@ function Workflow({ project, act }: { project: Project; act: (p: Promise<unknown
         </div>
       ))}
       <div className="inline">
-        <button onClick={() => setMoves([...moves, { name: '', from: null, to: rows[0].key, rules: {} }])}>전이 추가</button>
-        <button className="primary" onClick={save}>워크플로 저장</button>
+        <button onClick={() => setMoves([...moves, { name: '', from: null, to: rows[0].key, rules: {} }])}>{t('workflow.addMove')}</button>
+        <button className="primary" onClick={save}>{t('workflow.save')}</button>
       </div>
     </section>
   )
@@ -180,23 +181,23 @@ function Webhooks({ project }: { project: Project }) {
   useEffect(() => { load() }, [])
   return (
     <section>
-      <h3>웹훅과 메신저</h3>
+      <h3>{t('hooks.title')}</h3>
       <ul className="list">
         {list.map((w) => (
           <li key={w.id}>
-            {w.url} <span className="muted">{w.format === 'chat' ? '메신저' : 'JSON'}</span>
-            {w.last && <span className={`pill ${w.last.error ? 'c3' : 'c2'}`}>{w.last.error ? `실패: ${w.last.error}` : '정상'}</span>}
+            {w.url} <span className="muted">{w.format === 'chat' ? t('hooks.chat') : 'JSON'}</span>
+            {w.last && <span className={`pill ${w.last.error ? 'c3' : 'c2'}`}>{w.last.error ? t('hooks.failed', { error: w.last.error }) : t('hooks.ok')}</span>}
             <button className="ghost" onClick={() => api('DELETE', `/api/projects/${project.key}/webhooks/${w.id}`).then(load)}>×</button>
           </li>
         ))}
       </ul>
       <form className="inline" onSubmit={(e) => {
         e.preventDefault()
-        api('POST', `/api/projects/${project.key}/webhooks`, { url, format }).then((r) => { setUrl(''); load(); if (format === 'json') prompt('서명 비밀값 (한 번만 표시됩니다)', r.secret) }, (x) => toast(message(x)))
+        api('POST', `/api/projects/${project.key}/webhooks`, { url, format }).then((r) => { setUrl(''); load(); if (format === 'json') prompt(t('hooks.secret'), r.secret) }, (x) => toast(message(x)))
       }}>
-        <select value={format} onChange={(e) => setFormat(e.target.value)}><option value="chat">Slack·Mattermost·Teams</option><option value="json">JSON (서명)</option></select>
+        <select value={format} onChange={(e) => setFormat(e.target.value)}><option value="chat">Slack·Mattermost·Teams</option><option value="json">{t('hooks.json')}</option></select>
         <input type="url" required placeholder="https://…" value={url} onChange={(e) => setUrl(e.target.value)} />
-        <button>추가</button>
+        <button>{t('common.add')}</button>
       </form>
     </section>
   )
@@ -207,14 +208,20 @@ export function MySettings({ me }: { me: Me }) {
   useEffect(() => { api('GET', '/api/me').then(setMine) }, [])
   return (
     <div className="settings">
-      <h1>내 설정 <span className="muted">{me.email}</span></h1>
+      <h1>{t('me.title')} <span className="muted">{me.email}</span></h1>
       <section>
-        <h3>알림 메일</h3>
-        {mine && !mine.mail && <p className="muted">이 서버에는 메일 발송(SMTP)이 설정되어 있지 않습니다.</p>}
+        <h3>{t('me.language')}</h3>
+        <select aria-label={t('me.language')} value={lang} onChange={(e) => api('PATCH', '/api/me', { locale: e.target.value }).then(() => setLang(e.target.value as Lang), (x) => toast(message(x)))}>
+          {Object.entries(LANGS).map(([code, l]) => <option key={code} value={code}>{l.label}</option>)}
+        </select>
+      </section>
+      <section>
+        <h3>{t('me.mail')}</h3>
+        {mine && !mine.mail && <p className="muted">{t('me.mailOff')}</p>}
         {mine && (
           <label className="check">
             <input type="checkbox" checked={mine.emailNotify} onChange={(e) => api('PATCH', '/api/me', { emailNotify: e.target.checked }).then(() => setMine({ ...mine, emailNotify: e.target.checked }))} />
-            읽지 않은 알림을 메일로 묶어 받기 (마지막 알림 후 5분, 최대 30분 뒤)
+            {t('me.mailDigest')}
           </label>
         )}
       </section>
@@ -228,16 +235,16 @@ function Password({ hasPassword }: { hasPassword: boolean }) {
   const [f, setF] = useState({ current: '', password: '', again: '' })
   return (
     <section>
-      <h3>비밀번호</h3>
+      <h3>{t('auth.password.title')}</h3>
       <form className="inline" onSubmit={(e) => {
         e.preventDefault()
-        if (f.password !== f.again) return toast('새 비밀번호가 서로 다릅니다.')
-        api('POST', '/api/me/password', { current: f.current, password: f.password }).then(() => { toast('비밀번호를 바꿨습니다. 다른 기기의 로그인은 끊겼습니다.'); setF({ current: '', password: '', again: '' }) }, (x) => toast(message(x)))
+        if (f.password !== f.again) return toast(t('me.passwordMismatch'))
+        api('POST', '/api/me/password', { current: f.current, password: f.password }).then(() => { toast(t('me.passwordChanged')); setF({ current: '', password: '', again: '' }) }, (x) => toast(message(x)))
       }}>
-        {hasPassword && <input type="password" required placeholder="현재 비밀번호" autoComplete="current-password" value={f.current} onChange={(e) => setF({ ...f, current: e.target.value })} />}
-        <input type="password" required minLength={8} placeholder="새 비밀번호 (8자 이상)" autoComplete="new-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} />
-        <input type="password" required minLength={8} placeholder="새 비밀번호 확인" autoComplete="new-password" value={f.again} onChange={(e) => setF({ ...f, again: e.target.value })} />
-        <button>{hasPassword ? '바꾸기' : '설정하기'}</button>
+        {hasPassword && <input type="password" required placeholder={t('me.currentPassword')} aria-label={t('me.currentPassword')} autoComplete="current-password" value={f.current} onChange={(e) => setF({ ...f, current: e.target.value })} />}
+        <input type="password" required minLength={8} placeholder={t('auth.newPassword')} aria-label={t('auth.newPassword')} autoComplete="new-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} />
+        <input type="password" required minLength={8} placeholder={t('me.confirmPassword')} aria-label={t('me.confirmPassword')} autoComplete="new-password" value={f.again} onChange={(e) => setF({ ...f, again: e.target.value })} />
+        <button>{hasPassword ? t('me.change') : t('me.set')}</button>
       </form>
     </section>
   )
@@ -251,15 +258,15 @@ function Tokens() {
   useEffect(() => { load() }, [])
   return (
     <section>
-      <h3>내 API 토큰</h3>
-      <p className="muted">스크립트와 AI 에이전트가 내 권한으로 API를 씁니다. 90일 뒤 만료됩니다.</p>
-      {shown && <p className="token">새 토큰 (지금만 보입니다): <code>{shown}</code></p>}
+      <h3>{t('tokens.title')}</h3>
+      <p className="muted">{t('tokens.sub')}</p>
+      {shown && <p className="token">{t('tokens.once')} <code>{shown}</code></p>}
       <ul className="list">
-        {list.map((t) => <li key={t.id}>{t.name} <span className="muted">{new Date(t.expiresAt).toLocaleDateString()} 만료</span><button className="ghost" onClick={() => api('DELETE', `/api/me/tokens/${t.id}`).then(load)}>폐기</button></li>)}
+        {list.map((k) => <li key={k.id}>{k.name} <span className="muted">{t('tokens.expires', { date: new Date(k.expiresAt).toLocaleDateString() })}</span><button className="ghost" onClick={() => api('DELETE', `/api/me/tokens/${k.id}`).then(load)}>{t('tokens.revoke')}</button></li>)}
       </ul>
       <form className="inline" onSubmit={(e) => { e.preventDefault(); api('POST', '/api/me/tokens', { name }).then((r) => { setShown(r.token); setName(''); load() }) }}>
-        <input required placeholder="토큰 이름" value={name} onChange={(e) => setName(e.target.value)} />
-        <button>만들기</button>
+        <input required placeholder={t('tokens.name')} aria-label={t('tokens.name')} value={name} onChange={(e) => setName(e.target.value)} />
+        <button>{t('common.create')}</button>
       </form>
     </section>
   )

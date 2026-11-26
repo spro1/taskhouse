@@ -8,6 +8,7 @@ import net from 'node:net'
 import { readdirSync, statSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Db } from './db.ts'
+import { encrypting, isSealed, openSecret, sealSecret } from './secret.ts'
 
 const MAX_ATTEMPTS = 5
 
@@ -62,7 +63,7 @@ async function deliver(db: Db, payload: { hook: number; body: any }) {
   const text = b.issue ? `${b.actor?.name ?? 'taskhouse'} · ${b.event} · <${b.issue.url}|${b.issue.key}> ${b.issue.title}` : `${b.event} ${b.project ?? ''}`
   const raw = JSON.stringify(hook.format === 'chat' ? { text } : b)
   const status = await post(hook.url, raw, {
-    'content-type': 'application/json', 'x-signature': `sha256=${createHmac('sha256', hook.secret).update(raw).digest('hex')}`, 'x-event': b.event,
+    'content-type': 'application/json', 'x-signature': `sha256=${createHmac('sha256', openSecret(hook.secret)).update(raw).digest('hex')}`, 'x-event': b.event,
   })
   if (status < 200 || status >= 300) throw new Error(`HTTP ${status}`)
 }
@@ -95,6 +96,14 @@ export async function pruneFiles(db: Db, filesDir: string, now = Date.now()) {
     if (!used.has(name) && now - statSync(path).mtimeMs > 3600_000) unlinkSync(path), removed++
   }
   return removed
+}
+
+/** Once SECRET_KEY is set, signing keys saved before it get encrypted (at start-up; same key, so receivers see no change). */
+export async function sealWebhookSecrets(db: Db) {
+  if (!encrypting()) return 0
+  const plain = (await db.query('SELECT id, secret FROM webhooks')).rows.filter((r) => !isSealed(r.secret))
+  for (const r of plain) await db.query('UPDATE webhooks SET secret = $2 WHERE id = $1', [r.id, sealSecret(r.secret)])
+  return plain.length
 }
 
 export async function prune(db: Db) {

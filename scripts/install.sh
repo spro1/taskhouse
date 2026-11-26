@@ -8,9 +8,10 @@ set -eu
 if [ ! -f .env ]; then
   cp .env.example .env
   pw=$(od -An -tx1 -N24 /dev/urandom | tr -d ' \n')
-  sed -i.bak "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$pw/" .env && rm -f .env.bak
+  key=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')
+  sed -i.bak -e "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$pw/" -e "s/^SECRET_KEY=.*/SECRET_KEY=$key/" .env && rm -f .env.bak
   chmod 600 .env
-  echo ".env written (edit PUBLIC_URL and SSO settings there)."
+  echo ".env written with a random database password and SECRET_KEY (keep a copy of .env: backups do not contain it)."
 fi
 mkdir -p backups
 if [ -n "${1:-}" ]; then

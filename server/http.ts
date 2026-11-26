@@ -25,9 +25,19 @@ export class HttpError extends Error {
   }
 }
 
-export const clientIp = (c: Context) =>
-  (process.env.TRUST_PROXY === '1' ? c.req.header('x-forwarded-for')?.split(',')[0].trim() : undefined) ??
-  ((c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)?.incoming?.socket?.remoteAddress ?? '')
+/**
+ * The caller's address. TRUST_PROXY is how many reverse proxies stand in front (1 = one nginx). Each proxy appends to
+ * X-Forwarded-For, so the client is that many hops from the right; the left end is whatever the client sent.
+ */
+export const clientIp = (c: Context) => {
+  const proxies = Math.max(0, Math.floor(Number(process.env.TRUST_PROXY) || 0))
+  if (proxies) {
+    const hops = (c.req.header('x-forwarded-for') ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+    const ip = hops[hops.length - proxies]
+    if (ip) return ip
+  }
+  return (c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)?.incoming?.socket?.remoteAddress ?? 'local'
+}
 
 export async function audit(db: Db, c: Context, action: string, target: string | null, ok = true, detail?: object, actorId?: number | null) {
   const actor = actorId !== undefined ? actorId : ((c.get('user') as User | undefined)?.id ?? null)

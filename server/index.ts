@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { createApp } from './app.ts'
 import { openDb } from './db.ts'
 import { ensureSetupToken } from './auth.ts'
-import { startJobs } from './jobs.ts'
+import { sealWebhookSecrets, startJobs } from './jobs.ts'
 import { startMail } from './mail.ts'
 
 if (!process.env.DATABASE_URL) {
@@ -15,6 +15,7 @@ if (!process.env.DATABASE_URL) {
 const db = await openDb(process.env.DATABASE_URL)
 const dataDir = process.env.DATA_DIR ?? './data'
 const app = createApp(db, dataDir, process.env.DATABASE_URL)
+await sealWebhookSecrets(db)
 startJobs(db, join(dataDir, 'files'))
 startMail(db)
 
