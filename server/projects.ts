@@ -5,6 +5,7 @@ import { tx, type Db } from './db.ts'
 import { audit, body, fail, HttpError, type Env, type User } from './http.ts'
 import { LEVEL, LEVEL_NAME, projectsFor } from './access.ts'
 import { applyChanges, enqueue, issueSelect } from './issues.ts'
+import { sealSecret } from './secret.ts'
 
 // No "backlog" status: in scrum the backlog is "not in a sprint", and a second meaning only confuses the board.
 const DEFAULT_STATUSES: [string, number][] = [['할 일', 0], ['진행 중', 1], ['리뷰 중', 1], ['완료', 2]]
@@ -200,7 +201,7 @@ export function registerProjects(app: Hono<Env>, db: Db) {
     if (!url || !/^https?:$/.test(url.protocol) || url.username || !['json', 'chat'].includes(b.format ?? 'json')) return fail(c, 400, 'bad_request')
     const secret = randomBytes(24).toString('hex')
     const row = (await db.query('INSERT INTO webhooks (project_id, url, secret, format, events) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-      [p.id, url.toString(), secret, b.format ?? 'json', events])).rows[0]
+      [p.id, url.toString(), sealSecret(secret), b.format ?? 'json', events])).rows[0]
     await audit(db, c, 'webhook.create', p.key, true, { url: url.origin, format: b.format ?? 'json' })
     // The signing secret is shown once.
     return c.json({ id: row.id, secret }, 201)

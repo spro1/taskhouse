@@ -3,9 +3,12 @@ import type { Context, Hono } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { randomBytes, scryptSync, timingSafeEqual, createHash } from 'node:crypto'
 import { tx, type Db } from './db.ts'
-import { audit, body, fail, sha256, type Env, type User } from './http.ts'
+import { mailer, mailFrom, textFor } from './mail.ts'
+import { encrypting, isSealed, openSecret, sealSecret } from './secret.ts'
+import { audit, body, clientIp, fail, sha256, type Env, type User } from './http.ts'
 
-const SESSION_HOURS = Number(process.env.SESSION_HOURS ?? 12)
+// A day by default: sign in once per working day. Applies to new sign-ins; existing sessions keep their expiry.
+const SESSION_HOURS = Number(process.env.SESSION_HOURS ?? 24)
 // An SSO account that hasn't signed in for this long is probably gone at the IdP (no SCIM here): its API tokens stop.
 const TOKEN_SSO_GRACE_DAYS = Number(process.env.TOKEN_SSO_GRACE_DAYS ?? 30)
 const b64url = (b: Buffer) => b.toString('base64url')
@@ -32,15 +35,22 @@ async function startSession(db: Db, c: Context, userId: number) {
   setCookie(c, 'sid', token, { httpOnly: true, sameSite: 'Lax', path: '/', secure: secure(c), maxAge: SESSION_HOURS * 3600 })
 }
 
-// shortcut: per-process counter; with several app instances an attacker gets N x the attempts. Move to the DB if that matters.
-const failures = new Map<string, { n: number; until: number }>()
-const locked = (key: string) => (failures.get(key)?.until ?? 0) > Date.now()
-function noteFailure(key: string) {
-  const f = failures.get(key) ?? { n: 0, until: 0 }
-  f.n++
-  if (f.n >= 10) Object.assign(f, { n: 0, until: Date.now() + 15 * 60_000 })
-  failures.set(key, f)
+// Guessing limits over a sliding 15 minutes: 10 failures per address and account, 50 per address (one machine trying
+// many accounts), 30 per account (many machines trying one account, without locking its owner out for long).
+// shortcut: per-process counters; with several app instances an attacker gets N x the attempts. Move to the DB if that matters.
+const WINDOW = 15 * 60_000
+const failures = new Map<string, number[]>()
+const recent = (key: string) => (failures.get(key) ?? []).filter((t) => Date.now() - t < WINDOW)
+const keys = (c: Context, account: string) => [`${clientIp(c)}|${account}`, clientIp(c), `account|${account}`]
+export function throttled(c: Context, account: string) {
+  const [both, ip, acc] = keys(c, account)
+  return recent(both).length >= 10 || recent(ip).length >= 50 || recent(acc).length >= 30
 }
+export function failed(c: Context, account: string) {
+  for (const k of keys(c, account)) failures.set(k, [...recent(k), Date.now()])
+  if (failures.size > 10_000) for (const [k] of failures) if (!recent(k).length) failures.delete(k)
+}
+export const tooMany = (c: Context) => (c.header('Retry-After', String(WINDOW / 1000)), fail(c, 429, 'too_many_attempts'))
 
 /** First run: no users yet. The setup token is printed to the log so only whoever runs the server can claim admin. */
 // Stored as is (not hashed) so every app instance prints the same token; it only lives until the admin exists,
@@ -52,16 +62,25 @@ export async function ensureSetupToken(db: Db) {
   return (await db.query(`SELECT value FROM settings WHERE key = 'setup_token'`)).rows[0].value as string
 }
 
-type Oidc = { issuer: string; clientId: string; clientSecret: string; label: string; groupsClaim: string; adminGroup: string; publicUrl: string }
-const oidc = (): Oidc | null =>
-  process.env.OIDC_ISSUER && process.env.OIDC_CLIENT_ID
+// SSO comes from environment variables (they win, and make the admin screen read-only) or from Admin → SSO
+// (stored in settings, client secret encrypted with SECRET_KEY).
+// autoCreate: make an account on first SSO sign-in (off: only people with an account already linked, or linkable by email).
+// trustEmail: treat an email the IdP doesn't mark verified as verified when linking to an existing account, for IdPs that
+// never send email_verified (some Entra ID setups). Defaults keep the original behaviour: create, and link only verified.
+type SsoSettings = {
+  enabled: boolean; issuer: string; clientId: string; clientSecret: string; label: string; groupsClaim: string; adminGroup: string
+  passwordLogin: boolean; autoCreate: boolean; trustEmail: boolean
+}
+type Oidc = Omit<SsoSettings, 'enabled'> & { publicUrl: string }
+const publicUrl = () => (process.env.PUBLIC_URL ?? '').replace(/\/$/, '')
+const ssoFromEnv = (env = process.env): Oidc | null =>
+  env.OIDC_ISSUER && env.OIDC_CLIENT_ID
     ? {
-        issuer: process.env.OIDC_ISSUER.replace(/\/$/, ''), clientId: process.env.OIDC_CLIENT_ID, clientSecret: process.env.OIDC_CLIENT_SECRET ?? '',
-        label: process.env.OIDC_LABEL || 'SSO', groupsClaim: process.env.OIDC_GROUPS_CLAIM || 'groups', adminGroup: process.env.OIDC_ADMIN_GROUP ?? '',
-        publicUrl: (process.env.PUBLIC_URL ?? '').replace(/\/$/, ''),
+        issuer: env.OIDC_ISSUER.replace(/\/$/, ''), clientId: env.OIDC_CLIENT_ID, clientSecret: env.OIDC_CLIENT_SECRET ?? '',
+        label: env.OIDC_LABEL || 'SSO', groupsClaim: env.OIDC_GROUPS_CLAIM || 'groups', adminGroup: env.OIDC_ADMIN_GROUP ?? '',
+        passwordLogin: env.PASSWORD_LOGIN !== '0', autoCreate: env.OIDC_AUTO_CREATE !== '0', trustEmail: env.OIDC_TRUST_EMAIL === '1', publicUrl: publicUrl(),
       }
     : null
-const passwordLogin = () => process.env.PASSWORD_LOGIN !== '0'
 
 type Discovery = { issuer: string; authorization_endpoint: string; token_endpoint: string; userinfo_endpoint?: string; end_session_endpoint?: string }
 let discovery: { at: number; issuer: string; d: Discovery } | null = null
@@ -79,11 +98,45 @@ const redirectUri = (c: Context, cfg: Oidc) => `${cfg.publicUrl || new URL(c.req
 export function registerAuth(app: Hono<Env>, db: Db) {
   const one = async (sql: string, params: unknown[] = []) => (await db.query(sql, params)).rows[0]
 
+  const storedSso = async (): Promise<SsoSettings | null> => {
+    const s = (await one(`SELECT value FROM settings WHERE key = 'sso'`))?.value as SsoSettings | undefined
+    if (!s) return null
+    // Saved before SECRET_KEY was set: encrypt it now.
+    if (s.clientSecret && !isSealed(s.clientSecret) && encrypting()) await saveSso(s)
+    try {
+      return { ...s, clientSecret: openSecret(s.clientSecret ?? '') }
+    } catch (e) {
+      // Wrong or missing SECRET_KEY: carry on without the secret (sign-in fails) so an admin can enter it again.
+      console.error('sso:', (e as Error).message)
+      return { ...s, clientSecret: '' }
+    }
+  }
+  const saveSso = (s: SsoSettings) => db.query(`INSERT INTO settings (key, value) VALUES ('sso', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+    [JSON.stringify({ ...s, clientSecret: sealSecret(s.clientSecret) })])
+  // shortcut: other app instances notice a change within 30 seconds; fine for a setting changed once in a while.
+  let ssoCache: { at: number; cfg: Oidc | null } | null = null
+  const oidc = async (): Promise<Oidc | null> => {
+    const env = ssoFromEnv()
+    if (env) return env
+    if (ssoCache && Date.now() - ssoCache.at < 30_000) return ssoCache.cfg
+    const s = await storedSso()
+    // Settings saved before these options existed get their defaults.
+    const cfg = s?.enabled && s.issuer && s.clientId
+      ? { ...s, label: s.label || 'SSO', groupsClaim: s.groupsClaim || 'groups', autoCreate: s.autoCreate ?? true, trustEmail: s.trustEmail ?? false, publicUrl: publicUrl() }
+      : null
+    ssoCache = { at: Date.now(), cfg }
+    return cfg
+  }
+  // Password sign-in can only be turned off while SSO is on.
+  const passwordLogin = async () => (await oidc())?.passwordLogin ?? true
+
   app.get('/api/auth/state', async (c) => {
-    const cfg = oidc()
+    const cfg = await oidc()
     return c.json({
       setupRequired: !(await one('SELECT 1 AS x FROM users LIMIT 1')),
-      passwordLogin: passwordLogin(),
+      // "Forgot password" needs mail; without it the sign-in screen says to ask an admin.
+      forgot: !!mailer(),
+      passwordLogin: cfg?.passwordLogin ?? true,
       sso: cfg ? { label: cfg.label } : null,
     })
   })
@@ -91,6 +144,7 @@ export function registerAuth(app: Hono<Env>, db: Db) {
   app.post('/api/auth/setup', async (c) => {
     const b = await body(c)
     if (!validEmail(b.email) || !validPassword(b.password) || typeof b.name !== 'string' || !b.name.trim()) return fail(c, 400, 'bad_request')
+    if (throttled(c, 'setup')) return tooMany(c)
     const user = await tx(db, async (q) => {
       // One setup at a time; whoever is second sees a user already there.
       await q.query('SELECT pg_advisory_xact_lock(727102)')
@@ -102,7 +156,7 @@ export function registerAuth(app: Hono<Env>, db: Db) {
         [b.email.toLowerCase(), b.name.trim().slice(0, 100), hashPassword(b.password)])).rows[0]
     })
     if (user === 'done') return fail(c, 409, 'already_set_up')
-    if (!user) return audit(db, c, 'auth.setup', null, false).then(() => fail(c, 403, 'bad_setup_token'))
+    if (!user) return failed(c, 'setup'), audit(db, c, 'auth.setup', null, false).then(() => fail(c, 403, 'bad_setup_token'))
     await startSession(db, c, user.id)
     await audit(db, c, 'auth.setup', null, true, undefined, user.id)
     return c.json({ ok: true })
@@ -111,20 +165,20 @@ export function registerAuth(app: Hono<Env>, db: Db) {
   app.post('/api/auth/login', async (c) => {
     const b = await body(c)
     const email = String(b.email ?? '').toLowerCase()
-    if (!passwordLogin() && oidc()) {
+    if (!(await passwordLogin())) {
       // SSO-only mode still lets admins with a password in (break-glass), so an IdP outage can be fixed.
       // Linking the account to SSO later doesn't take that away.
       const u = await one(`SELECT id FROM users WHERE email = $1 AND is_admin AND password_hash <> ''`, [email])
       if (!u) return fail(c, 403, 'sso_only')
     }
-    if (locked(email)) return fail(c, 429, 'too_many_attempts')
+    if (throttled(c, email)) return tooMany(c)
     const u = await one('SELECT id, password_hash, disabled_at FROM users WHERE email = $1', [email])
     if (!checkPassword(String(b.password ?? ''), u?.password_hash ?? '') || u.disabled_at) {
-      noteFailure(email)
+      failed(c, email)
       await audit(db, c, 'auth.login', email, false, undefined, u?.id ?? null)
       return fail(c, 401, 'bad_credentials')
     }
-    failures.delete(email)
+    failures.delete(`${clientIp(c)}|${email}`)
     await startSession(db, c, u.id)
     await audit(db, c, 'auth.login', email, true, undefined, u.id)
     return c.json({ ok: true })
@@ -138,7 +192,7 @@ export function registerAuth(app: Hono<Env>, db: Db) {
     deleteCookie(c, 'sid', { path: '/' })
     const idToken = getCookie(c, 'oidc_idt')
     deleteCookie(c, 'oidc_idt', { path: '/api/auth' })
-    const cfg = oidc()
+    const cfg = await oidc()
     const d = idToken && cfg ? await discover(cfg.issuer).catch(() => null) : null
     const redirect = d?.end_session_endpoint
       ? `${d.end_session_endpoint}?${new URLSearchParams({ id_token_hint: idToken!, client_id: cfg!.clientId, post_logout_redirect_uri: `${cfg!.publicUrl || new URL(c.req.url).origin}/` })}`
@@ -181,7 +235,7 @@ export function registerAuth(app: Hono<Env>, db: Db) {
         WHERE p.token_hash = $1 AND p.used_at IS NULL AND p.expires_at > now() AND u.id = p.user_id AND u.disabled_at IS NULL RETURNING p.user_id`,
         [sha256(c.req.param('token'))])).rows[0]
       if (!r) return null
-      await q.query('UPDATE users SET password_hash = $2 WHERE id = $1', [r.user_id, hashPassword(b.password)])
+      await q.query('UPDATE users SET password_hash = $2, must_change_password = false WHERE id = $1', [r.user_id, hashPassword(b.password)])
       await q.query('DELETE FROM sessions WHERE user_id = $1', [r.user_id])
       return r.user_id as number
     })
@@ -191,8 +245,30 @@ export function registerAuth(app: Hono<Env>, db: Db) {
     return c.json({ ok: true })
   })
 
+  // Forgot password (only with mail set up): a one-hour reset link goes to the address. The answer is the same whether
+  // or not the address has an account, so this can't be used to find out who does; every request counts toward the
+  // sign-in limits, so nobody gets flooded with mail.
+  app.post('/api/auth/forgot', async (c) => {
+    const transport = mailer()
+    if (!transport) return fail(c, 404, 'mail_off')
+    const email = String((await body(c)).email ?? '').trim().toLowerCase()
+    if (throttled(c, `forgot:${email}`)) return tooMany(c)
+    failed(c, `forgot:${email}`)
+    const u = validEmail(email) && (await one('SELECT id, locale FROM users WHERE email = $1 AND disabled_at IS NULL', [email]))
+    await audit(db, c, 'auth.forgot', email, true, undefined, null)
+    if (u) {
+      const token = b64url(randomBytes(24))
+      await db.query(`INSERT INTO password_resets (token_hash, user_id, created_by, expires_at) VALUES ($1, $2, $2, now() + interval '1 hour')`, [sha256(token), u.id])
+      const L = textFor(u.locale)
+      const base = (process.env.PUBLIC_URL ?? '').replace(/\/$/, '') || new URL(c.req.url).origin
+      await transport.sendMail({ from: mailFrom(), to: email, subject: L.resetSubject, text: `${L.resetBody}\n\n${base}/reset/${token}\n\n${L.resetIgnore}\n` })
+        .catch((e: Error) => console.error('forgot-password mail failed:', e.message))
+    }
+    return c.json({ ok: true })
+  })
+
   app.get('/api/auth/oidc/start', async (c) => {
-    const cfg = oidc()
+    const cfg = await oidc()
     const d = cfg && (await discover(cfg.issuer).catch(() => null))
     if (!cfg || !d) return c.redirect('/?sso_error=unavailable')
     const [state, verifier, nonce] = [24, 32, 16].map((n) => b64url(randomBytes(n)))
@@ -212,7 +288,7 @@ export function registerAuth(app: Hono<Env>, db: Db) {
     const [state, verifier, nonce] = (getCookie(c, 'oidc') ?? '').split('.')
     deleteCookie(c, 'oidc', { path: '/api/auth/oidc' })
     const code = c.req.query('code')
-    const cfg = oidc()
+    const cfg = await oidc()
     if (!cfg || !state || !code || c.req.query('state') !== state) return back('failed')
     try {
       const d = await discover(cfg.issuer)
@@ -236,7 +312,9 @@ export function registerAuth(app: Hono<Env>, db: Db) {
       const all = { ...claims, ...(info?.sub === claims.sub ? info : {}) }
       const sub = String(claims.sub ?? '')
       const email = typeof all.email === 'string' ? all.email.toLowerCase() : ''
-      const verified = all.email_verified === true || all.email_verified === 'true'
+      // Only for linking an existing account by email. trustEmail covers a missing claim only: any other value that
+      // isn't true / "true" (false, "false", ...) means not verified, whatever the setting.
+      const verified = all.email_verified === true || all.email_verified === 'true' || (cfg.trustEmail && all.email_verified == null)
       if (!sub) return back('failed')
       const rawGroups = all[cfg.groupsClaim]
       // A claim that's missing means "this IdP doesn't send groups": keep whatever groups the account has.
@@ -248,6 +326,7 @@ export function registerAuth(app: Hono<Env>, db: Db) {
         // An existing local account is linked only when the IdP vouches for the email.
         if (!u && email && verified) u = (await q.query('UPDATE users SET oidc_sub = $2 WHERE email = $1 AND oidc_sub IS NULL RETURNING id, disabled_at', [email, sub])).rows[0]
         if (!u) {
+          if (!cfg.autoCreate) return 'no_account'
           if (!email) return 'no_email'
           u = (await q.query(`INSERT INTO users (email, name, oidc_sub) VALUES ($1, $2, $3) ON CONFLICT (email) DO NOTHING RETURNING id, disabled_at`, [email, name, sub])).rows[0]
           if (!u) return 'email_taken'
@@ -300,11 +379,14 @@ export function registerAuth(app: Hono<Env>, db: Db) {
   })
 
   app.get('/api/me', async (c) =>
-    c.json({ ...c.get('user'), ...(await one(`SELECT email_notify AS "emailNotify", password_hash <> '' AS "hasPassword" FROM users WHERE id = $1`, [c.get('user').id])), mail: !!process.env.SMTP_URL }))
+    c.json({ ...c.get('user'), ...(await one(`SELECT email_notify AS "emailNotify", password_hash <> '' AS "hasPassword",
+      must_change_password AS "mustChangePassword", locale FROM users WHERE id = $1`, [c.get('user').id])), mail: !!mailer() }))
   app.patch('/api/me', async (c) => {
     const b = await body(c)
-    if (typeof b.emailNotify !== 'boolean') return fail(c, 400, 'bad_request')
-    await db.query('UPDATE users SET email_notify = $2 WHERE id = $1', [c.get('user').id, b.emailNotify])
+    const notify = typeof b.emailNotify === 'boolean' ? b.emailNotify : null
+    const locale = b.locale === 'ko' || b.locale === 'en' ? b.locale : null
+    if (notify === null && locale === null) return fail(c, 400, 'bad_request')
+    await db.query('UPDATE users SET email_notify = COALESCE($2, email_notify), locale = COALESCE($3, locale) WHERE id = $1', [c.get('user').id, notify, locale])
     return c.json({ ok: true })
   })
 
@@ -314,11 +396,13 @@ export function registerAuth(app: Hono<Env>, db: Db) {
     const b = await body(c)
     if (!validPassword(b.password)) return fail(c, 400, 'bad_request')
     const u = await one('SELECT password_hash FROM users WHERE id = $1', [c.get('user').id])
+    if (throttled(c, c.get('user').email)) return tooMany(c)
     if (u.password_hash && !checkPassword(String(b.current ?? ''), u.password_hash)) {
+      failed(c, c.get('user').email)
       await audit(db, c, 'user.password', String(c.get('user').id), false)
       return fail(c, 403, 'bad_credentials')
     }
-    await db.query('UPDATE users SET password_hash = $2 WHERE id = $1', [c.get('user').id, hashPassword(b.password)])
+    await db.query('UPDATE users SET password_hash = $2, must_change_password = false WHERE id = $1', [c.get('user').id, hashPassword(b.password)])
     await db.query('DELETE FROM sessions WHERE user_id = $1 AND token_hash <> $2', [c.get('user').id, sha256(getCookie(c, 'sid') ?? '')])
     await audit(db, c, 'user.password', String(c.get('user').id))
     return c.json({ ok: true })
@@ -384,6 +468,20 @@ export function registerAuth(app: Hono<Env>, db: Db) {
     await audit(db, c, 'user.reset_link', String(id))
     return c.json({ token, url: `/reset/${token}` })
   })
+  // A temporary password the admin passes on (by phone, in person): the old one stops working, the person is signed
+  // out everywhere and must choose their own after signing in with it.
+  app.post('/api/admin/users/:id/temp-password', async (c) => {
+    const id = Number(c.req.param('id')) || 0
+    if (id === c.get('user').id) return fail(c, 400, 'not_yourself')
+    // Easy to read out loud: no 0/O, 1/l/I.
+    const abc = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+    const password = [...randomBytes(12)].map((x) => abc[x % abc.length]).join('')
+    const r = await db.query('UPDATE users SET password_hash = $2, must_change_password = true WHERE id = $1 AND disabled_at IS NULL', [id, hashPassword(password)])
+    if (!r.rowCount) return fail(c, 404, 'not_found')
+    await db.query('DELETE FROM sessions WHERE user_id = $1', [id])
+    await audit(db, c, 'user.temp_password', String(id))
+    return c.json({ password })
+  })
   app.post('/api/admin/invites', async (c) => {
     const b = await body(c)
     if (!validEmail(b.email)) return fail(c, 400, 'bad_request')
@@ -409,6 +507,60 @@ export function registerAuth(app: Hono<Env>, db: Db) {
     await audit(db, c, 'group.update', name, true, { members })
     return c.json({ id: r.id })
   })
+  // Admin → SSO. The secret is never sent back, only whether there is one.
+  const ssoView = async (c: Context) => {
+    const env = ssoFromEnv()
+    const s = env ? { ...env, enabled: true } : await storedSso()
+    return {
+      source: env ? 'env' : 'admin', enabled: !!s?.enabled, issuer: s?.issuer ?? '', clientId: s?.clientId ?? '', hasSecret: !!s?.clientSecret,
+      label: s?.label ?? '', groupsClaim: s?.groupsClaim ?? 'groups', adminGroup: s?.adminGroup ?? '', passwordLogin: s?.passwordLogin ?? true,
+      autoCreate: s?.autoCreate ?? true, trustEmail: s?.trustEmail ?? false,
+      redirectUri: `${publicUrl() || new URL(c.req.url).origin}/api/auth/oidc/callback`, encrypted: encrypting(),
+    }
+  }
+  const httpUrl = (v: unknown) => {
+    try {
+      const u = new URL(String(v))
+      return /^https?:$/.test(u.protocol) && !u.username && !u.password ? u.toString().replace(/\/$/, '') : null
+    } catch {
+      return null
+    }
+  }
+  app.get('/api/admin/sso', async (c) => c.json(await ssoView(c)))
+  app.put('/api/admin/sso', async (c) => {
+    if (ssoFromEnv()) return fail(c, 409, 'sso_env')
+    const b = await body(c)
+    const old = await storedSso()
+    const issuer = b.issuer ? httpUrl(b.issuer) : ''
+    if (issuer === null) return fail(c, 400, 'sso_issuer')
+    const s: SsoSettings = {
+      enabled: b.enabled === true, issuer, clientId: String(b.clientId ?? '').trim().slice(0, 300),
+      // Left empty, the stored secret stays: the screen never receives it to send back.
+      clientSecret: typeof b.clientSecret === 'string' && b.clientSecret ? b.clientSecret.slice(0, 1000) : old?.clientSecret ?? '',
+      label: String(b.label ?? '').trim().slice(0, 60), groupsClaim: String(b.groupsClaim ?? '').trim().slice(0, 100) || 'groups',
+      adminGroup: String(b.adminGroup ?? '').trim().slice(0, 200), passwordLogin: b.passwordLogin !== false,
+      autoCreate: b.autoCreate !== false, trustEmail: b.trustEmail === true,
+    }
+    if (s.enabled && (!s.issuer || !s.clientId)) return fail(c, 400, 'sso_incomplete')
+    // Refuse to switch on something that can't work, rather than leaving everyone with a broken sign-in button.
+    if (s.enabled && !(await discover(s.issuer).then(() => true, () => false))) return fail(c, 400, 'sso_discovery')
+    await saveSso(s)
+    ssoCache = null
+    await audit(db, c, 'settings.sso', null, true, { enabled: s.enabled, issuer: s.issuer, passwordLogin: s.passwordLogin })
+    return c.json(await ssoView(c))
+  })
+  app.post('/api/admin/sso/test', async (c) => {
+    const issuer = httpUrl((await body(c)).issuer)
+    if (!issuer) return c.json({ ok: false, error: 'The issuer must be an http(s) URL.' })
+    discovery = null
+    try {
+      const d = await discover(issuer)
+      return c.json({ ok: true, issuer: d.issuer ?? issuer })
+    } catch (e) {
+      return c.json({ ok: false, error: (e as Error).message })
+    }
+  })
+
   app.get('/api/admin/audit', async (c) =>
     c.json((await db.query(`SELECT a.id, a.at, a.action, a.target, a.ip, a.ok, a.detail, u.name AS actor FROM audit_log a LEFT JOIN users u ON u.id = a.actor_id
       WHERE ($1::bigint IS NULL OR a.id < $1) ORDER BY a.id DESC LIMIT 100`, [Number(c.req.query('before')) || null])).rows))

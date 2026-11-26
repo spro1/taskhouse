@@ -1,3 +1,4 @@
+import { t } from './i18n.ts'
 import { useEffect, useState, type DragEvent, type FormEvent } from 'react'
 import { api, message, PRIORITIES, searchAll, subscribe, type Issue, type Project, type Sprint } from './api.ts'
 import { Link, toast } from './App.tsx'
@@ -60,7 +61,7 @@ export function Board({ project }: { project: Project }) {
   useLiveReload(project.key, load, [active?.id])
   return (
     <>
-      <p className="muted">{active ? `${active.name}${active.endsAt ? ` · ${new Date(active.endsAt).toLocaleDateString()}까지` : ''}` : '진행 중인 스프린트가 없어 열린 이슈 전체(최근 14일 완료 포함)를 보여 줍니다.'}</p>
+      <p className="muted">{active ? `${active.name}${active.endsAt ? ` · ${t('board.until', { date: new Date(active.endsAt).toLocaleDateString() })}` : ''}` : t('board.noSprint')}</p>
       <div className="board">
         {project.statuses.map((s) => {
           const col = issues.filter((i) => i.status.id === s.id)
@@ -107,11 +108,11 @@ export function Backlog({ project, reload }: { project: Project; reload: () => v
           <section key={s?.id ?? 'backlog'} onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => { e.preventDefault(); move(dropKey(e), { sprint: s?.id ?? null, after: rows.at(-1)?.key }, load) }}>
             <header>
-              <h3>{s ? s.name : '백로그'} <span className="muted">{rows.length}건 · {pts}점</span></h3>
+              <h3>{s ? s.name : t('project.backlog')} <span className="muted">{t('backlog.count', { n: rows.length, points: pts })}</span></h3>
               <span className="grow" />
-              {s?.state === 'planned' && <button onClick={() => act(api('POST', `/api/projects/${project.key}/sprints/${s.id}/start`, { days: 14 }))}>스프린트 시작</button>}
-              {s?.state === 'active' && <button onClick={() => confirmComplete(project, s, act)}>스프린트 완료</button>}
-              {!s && <button onClick={() => act(api('POST', `/api/projects/${project.key}/sprints`, {}))}>스프린트 만들기</button>}
+              {s?.state === 'planned' && <button onClick={() => act(api('POST', `/api/projects/${project.key}/sprints/${s.id}/start`, { days: 14 }))}>{t('sprint.start')}</button>}
+              {s?.state === 'active' && <button onClick={() => confirmComplete(project, s, act)}>{t('sprint.complete')}</button>}
+              {!s && <button onClick={() => act(api('POST', `/api/projects/${project.key}/sprints`, {}))}>{t('sprint.create')}</button>}
             </header>
             <ul className="list rows">
               {rows.map((i) => (
@@ -128,7 +129,7 @@ export function Backlog({ project, reload }: { project: Project; reload: () => v
             {!s && (
               <form className="inline" onSubmit={create}>
                 <select value={type} onChange={(e) => setType(e.target.value)}>{project.types.filter((t) => t.level === 1).map((t) => <option key={t.id}>{t.name}</option>)}</select>
-                <input placeholder="새 이슈 제목 입력 후 Enter" value={title} onChange={(e) => setTitle(e.target.value)} />
+                <input placeholder={t('backlog.newIssue')} aria-label={t('backlog.newIssue')} value={title} onChange={(e) => setTitle(e.target.value)} />
               </form>
             )}
           </section>
@@ -142,5 +143,5 @@ function confirmComplete(project: Project, s: Sprint, act: (p: Promise<unknown>)
   const next = project.sprints.find((x) => x.state === 'planned')
   // Unfinished work goes to the next planned sprint if there is one, else back to the backlog.
   act(api('POST', `/api/projects/${project.key}/sprints/${s.id}/complete`, { moveTo: next?.id ?? null }).then((r) =>
-    toast(`스프린트를 완료했습니다. 미완료 ${r.moved}건을 ${next ? next.name : '백로그'}로 옮겼습니다.`)))
+    toast(t('sprint.completed', { n: r.moved, to: next ? next.name : t('project.backlog') }))))
 }

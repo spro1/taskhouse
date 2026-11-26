@@ -1,84 +1,140 @@
-// Site admin: people (invite, disable, admin, reset link) and the audit log.
+// Site admin: people (invite, disable, admin, reset link, temporary password), single sign-on and the audit log.
 import { useEffect, useState } from 'react'
 import { api, message } from './api.ts'
 import { toast, type Me } from './App.tsx'
+import { hasKey, t, type Key } from './i18n.ts'
 
 type Person = { id: number; email: string; name: string; isAdmin: boolean; sso: boolean; lastLoginAt: string | null; disabledAt: string | null }
 type Entry = { id: number; at: string; action: string; target: string | null; ip: string; ok: boolean; actor: string | null; detail: any }
 
-const ACTIONS: Record<string, string> = {
-  'auth.login': '로그인', 'auth.sso': 'SSO 로그인', 'auth.setup': '초기 설정', 'auth.reset': '비밀번호 재설정', 'user.password': '비밀번호 변경',
-  'user.update': '사용자 변경', 'user.invite': '초대', 'user.reset_link': '재설정 링크 발급', 'group.update': '그룹 변경', 'token.create': 'API 토큰 발급',
-  'token.revoke': 'API 토큰 폐기', 'project.create': '프로젝트 생성', 'project.update': '프로젝트 변경', 'project.roles': '역할 변경',
-  'project.workflow': '워크플로 변경', 'project.export': '내보내기', 'webhook.create': '웹훅 추가', 'webhook.delete': '웹훅 삭제',
-  'issue.delete': '이슈 삭제', 'issue.restore': '이슈 복원', 'issue.bulk': '일괄 수정',
-}
-
 export function Admin({ me }: { me: Me }) {
   const [people, setPeople] = useState<Person[]>([])
   const [log, setLog] = useState<Entry[]>([])
-  const [link, setLink] = useState<{ label: string; url: string } | null>(null)
+  const [link, setLink] = useState<{ label: string; value: string } | null>(null)
   const [email, setEmail] = useState('')
   const load = () => api<Person[]>('GET', '/api/admin/users').then(setPeople)
   const loadLog = (before?: number) => api<Entry[]>('GET', `/api/admin/audit${before ? `?before=${before}` : ''}`).then((r) => setLog(before ? [...log, ...r] : r))
   useEffect(() => { load(); loadLog() }, [])
   const update = (p: Person, change: object) => api('PATCH', `/api/admin/users/${p.id}`, change).then(() => { load(); loadLog() }, (e) => toast(message(e)))
-  const show = (label: string, url: string) => setLink({ label, url: location.origin + url })
-  if (!me.isAdmin) return <p>사이트 관리자만 볼 수 있습니다.</p>
+  const show = (label: string, value: string) => setLink({ label, value })
+  const temp = (p: Person) => {
+    if (!confirm(t('admin.temp.confirm', { name: p.name }))) return
+    api('POST', `/api/admin/users/${p.id}/temp-password`).then((r) => { show(t('admin.temp.label', { name: p.name }), r.password); loadLog() }, (x) => toast(message(x)))
+  }
+  if (!me.isAdmin) return <p>{t('admin.only')}</p>
   return (
     <div className="settings">
-      <h1>관리</h1>
+      <h1>{t('nav.admin')}</h1>
       <section>
-        <h3>사람</h3>
-        {link && <p className="token">{link.label}: <code>{link.url}</code></p>}
+        <h3>{t('admin.people')}</h3>
+        {link && <p className="token">{link.label}: <code>{link.value}</code></p>}
         <form className="inline" onSubmit={(e) => {
           e.preventDefault()
-          api('POST', '/api/admin/invites', { email }).then((r) => { show(`${email} 초대 링크 (7일, 1회용)`, r.url); setEmail('') }, (x) => toast(message(x)))
+          api('POST', '/api/admin/invites', { email }).then((r) => { show(t('admin.inviteLink', { email }), location.origin + r.url); setEmail('') }, (x) => toast(message(x)))
         }}>
-          <input type="email" required placeholder="초대할 이메일" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <button>초대 링크 만들기</button>
+          <input type="email" required placeholder={t('admin.inviteEmail')} aria-label={t('admin.inviteEmail')} value={email} onChange={(e) => setEmail(e.target.value)} />
+          <button>{t('admin.invite')}</button>
         </form>
         <table className="results">
-          <thead><tr><th>이름</th><th>이메일</th><th>로그인</th><th>마지막 로그인</th><th>관리자</th><th></th></tr></thead>
+          <thead><tr><th>{t('auth.name')}</th><th>{t('auth.email')}</th><th>{t('admin.signIn')}</th><th>{t('admin.lastLogin')}</th><th>{t('admin.isAdmin')}</th><th></th></tr></thead>
           <tbody>
             {people.map((p) => (
               <tr key={p.id} className={p.disabledAt ? 'muted' : ''}>
                 <td>{p.name}</td>
                 <td>{p.email}</td>
-                <td>{p.sso ? 'SSO' : '비밀번호'}</td>
-                <td>{p.lastLoginAt ? new Date(p.lastLoginAt).toLocaleString() : '없음'}</td>
-                <td><input type="checkbox" aria-label={`${p.name} 관리자`} checked={p.isAdmin} disabled={p.id === me.id} onChange={(e) => update(p, { isAdmin: e.target.checked })} /></td>
+                <td>{p.sso ? 'SSO' : t('auth.password.title')}</td>
+                <td>{p.lastLoginAt ? new Date(p.lastLoginAt).toLocaleString() : t('common.empty')}</td>
+                <td><input type="checkbox" aria-label={t('admin.isAdminOf', { name: p.name })} checked={p.isAdmin} disabled={p.id === me.id} onChange={(e) => update(p, { isAdmin: e.target.checked })} /></td>
                 <td>
-                  {!p.disabledAt && <button className="link" onClick={() => api('POST', `/api/admin/users/${p.id}/reset-link`).then((r) => show(`${p.name} 비밀번호 재설정 링크 (24시간, 1회용)`, r.url), (x) => toast(message(x)))}>재설정 링크</button>}{' '}
+                  {!p.disabledAt && <button className="link" onClick={() => api('POST', `/api/admin/users/${p.id}/reset-link`).then((r) => show(t('admin.resetLink', { name: p.name }), location.origin + r.url), (x) => toast(message(x)))}>{t('admin.reset')}</button>}{' '}
+                  {!p.disabledAt && p.id !== me.id && <button className="link" onClick={() => temp(p)}>{t('admin.temp')}</button>}{' '}
                   {p.id !== me.id && (
-                    <button className="link" onClick={() => update(p, { disabled: !p.disabledAt })}>{p.disabledAt ? '다시 활성화' : '비활성화'}</button>
+                    <button className="link" onClick={() => update(p, { disabled: !p.disabledAt })}>{p.disabledAt ? t('admin.enable') : t('admin.disable')}</button>
                   )}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-        <p className="muted small">비활성화하면 모든 세션과 API 토큰이 즉시 끊깁니다.</p>
+        <p className="muted small">{t('admin.disableNote')}</p>
       </section>
+      <Sso />
       <section>
-        <h3>감사 로그</h3>
+        <h3>{t('audit.title')}</h3>
         <table className="results">
-          <thead><tr><th>시각</th><th>누가</th><th>무엇</th><th>대상</th><th>IP</th><th>결과</th></tr></thead>
+          <thead><tr><th>{t('audit.when')}</th><th>{t('audit.who')}</th><th>{t('audit.what')}</th><th>{t('audit.target')}</th><th>IP</th><th>{t('audit.result')}</th></tr></thead>
           <tbody>
             {log.map((e) => (
               <tr key={e.id}>
                 <td className="muted">{new Date(e.at).toLocaleString()}</td>
                 <td>{e.actor ?? '-'}</td>
-                <td>{ACTIONS[e.action] ?? e.action}</td>
+                <td>{hasKey(`audit.${e.action}`) ? t(`audit.${e.action}` as Key) : e.action}</td>
                 <td>{e.target ?? ''}</td>
                 <td className="muted">{e.ip}</td>
-                <td>{e.ok ? '성공' : <span className="error">실패</span>}</td>
+                <td>{e.ok ? t('audit.ok') : <span className="error">{t('audit.failed')}</span>}</td>
               </tr>
             ))}
           </tbody>
         </table>
-        {log.length > 0 && log.length % 100 === 0 && <button onClick={() => loadLog(log.at(-1)!.id)}>더 보기</button>}
+        {log.length > 0 && log.length % 100 === 0 && <button onClick={() => loadLog(log.at(-1)!.id)}>{t('common.more')}</button>}
       </section>
     </div>
+  )
+}
+
+type SsoView = {
+  source: 'env' | 'admin'; enabled: boolean; issuer: string; clientId: string; hasSecret: boolean; label: string; groupsClaim: string
+  adminGroup: string; passwordLogin: boolean; autoCreate: boolean; trustEmail: boolean; redirectUri: string; encrypted: boolean
+}
+
+// Single sign-on (OpenID Connect). Read-only when the server sets it with OIDC_* environment variables.
+function Sso() {
+  const [v, setV] = useState<SsoView>()
+  const [f, setF] = useState({ issuer: '', clientId: '', clientSecret: '', label: '', groupsClaim: 'groups', adminGroup: '', passwordLogin: true, autoCreate: true, trustEmail: false })
+  const [test, setTest] = useState('')
+  const apply = (s: SsoView) => {
+    setV(s)
+    setF({ issuer: s.issuer, clientId: s.clientId, clientSecret: '', label: s.label, groupsClaim: s.groupsClaim, adminGroup: s.adminGroup,
+      passwordLogin: s.passwordLogin, autoCreate: s.autoCreate, trustEmail: s.trustEmail })
+  }
+  useEffect(() => { api<SsoView>('GET', '/api/admin/sso').then(apply) }, [])
+  if (!v) return null
+  const env = v.source === 'env'
+  const save = (enabled: boolean) => api<SsoView>('PUT', '/api/admin/sso', { ...f, enabled }).then((s) => { apply(s); toast(t(enabled ? 'sso.saved.on' : 'sso.saved.off')) }, (x) => toast(message(x)))
+  const text = (k: 'issuer' | 'clientId' | 'clientSecret' | 'label' | 'groupsClaim' | 'adminGroup', label: string, extra: object = {}) => (
+    <label>{label}<input value={f[k]} disabled={env} onChange={(e) => setF({ ...f, [k]: e.target.value })} {...extra} /></label>
+  )
+  return (
+    <section className="sso">
+      <h3>{t('sso.title')} <span className={`pill ${v.enabled ? 'c2' : 'c0'}`}>{v.enabled ? t('sso.on') : t('sso.off')}</span></h3>
+      {env && <p className="muted">{t('sso.env')}</p>}
+      <label>{t('sso.redirect')}<input readOnly value={v.redirectUri} onFocus={(e) => e.target.select()} /></label>
+      <p className="muted small">{t('sso.redirect.hint')}</p>
+      <div className="inline">
+        {text('issuer', t('sso.issuer'), { placeholder: 'https://sso.example.com/realms/company', type: 'url' })}
+        {!env && <button type="button" onClick={() => api('POST', '/api/admin/sso/test', { issuer: f.issuer }).then((r) => setTest(r.ok ? t('sso.test.ok', { issuer: r.issuer }) : t('sso.test.fail', { error: r.error })))}>{t('sso.test')}</button>}
+      </div>
+      {test && <p className="muted small" role="status">{test}</p>}
+      {text('clientId', t('sso.clientId'))}
+      {!env && text('clientSecret', t('sso.secret'), { type: 'password', placeholder: v.hasSecret ? t('sso.secret.kept') : '', autoComplete: 'new-password' })}
+      {!env && !v.encrypted && v.hasSecret && <p className="error small">{t('sso.plain')}</p>}
+      {text('label', t('sso.label'), { placeholder: 'SSO' })}
+      {text('groupsClaim', t('sso.groupsClaim'))}
+      {text('adminGroup', t('sso.adminGroup'))}
+      {(['autoCreate', 'passwordLogin', 'trustEmail'] as const).map((k) => (
+        <div key={k}>
+          <label className="check">
+            <input type="checkbox" checked={f[k]} disabled={env} onChange={(e) => setF({ ...f, [k]: e.target.checked })} />{t(`sso.${k}`)}
+          </label>
+          <p className="muted small">{t(`sso.${k}.hint`)}</p>
+        </div>
+      ))}
+      {!env && (
+        <div className="inline">
+          <button className="primary" onClick={() => save(true)}>{t(v.enabled ? 'common.save' : 'sso.enable')}</button>
+          {v.enabled && <button onClick={() => save(false)}>{t('sso.disable')}</button>}
+        </div>
+      )}
+    </section>
   )
 }

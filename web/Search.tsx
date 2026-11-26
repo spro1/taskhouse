@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { api, message, PRIORITIES, type Issue } from './api.ts'
 import { Link, toast } from './App.tsx'
+import { t } from './i18n.ts'
 
 type Filter = { id: number; name: string; tql: string | null }
 const EXAMPLES = [
@@ -33,34 +34,34 @@ export function Search() {
   useEffect(() => { run(initial); loadFilters() }, [])
   const submit = (e: FormEvent) => { e.preventDefault(); run(q) }
   const save = () => {
-    const name = prompt('필터 이름')
+    const name = prompt(t('search.filterName'))
     if (name) api('POST', '/api/filters', { name, tql: q }).then(loadFilters, (e) => toast(message(e)))
   }
   return (
     <div className="search-page">
       <aside>
-        <h3>저장된 필터</h3>
+        <h3>{t('search.saved')}</h3>
         <ul className="list">
           {filters.map((f) => (
             <li key={f.id}>
               <a href="#" onClick={(e) => { e.preventDefault(); if (f.tql) { setQ(f.tql); run(f.tql) } }}>{f.name}</a>
-              <button className="ghost" aria-label="필터 삭제" onClick={() => api('DELETE', `/api/filters/${f.id}`).then(loadFilters)}>×</button>
+              <button className="ghost" aria-label={t('search.deleteFilter')} onClick={() => api('DELETE', `/api/filters/${f.id}`).then(loadFilters)}>×</button>
             </li>
           ))}
-          {!filters.length && <li className="muted">없습니다.</li>}
+          {!filters.length && <li className="muted">{t('common.none')}</li>}
         </ul>
-        <h3>예시</h3>
+        <h3>{t('search.examples')}</h3>
         {EXAMPLES.map((x) => <button key={x} className="link example" onClick={() => { setQ(x); run(x) }}>{x}</button>)}
       </aside>
       <div>
         <form onSubmit={submit} className="inline">
           <input className="tql" value={q} onChange={(e) => setQ(e.target.value)} aria-label="TQL" spellCheck={false} />
-          <button className="primary">검색</button>
-          <button type="button" onClick={save}>필터로 저장</button>
+          <button className="primary">{t('search.run')}</button>
+          <button type="button" onClick={save}>{t('search.save')}</button>
         </form>
-        {error ? <p className="error">{error}</p> : <p className="muted">{issues.length}건{next ? ' 이상' : ''}</p>}
+        {error ? <p className="error">{error}</p> : <p className="muted">{t(next ? 'search.countMore' : 'search.count', { n: issues.length })}</p>}
         <table className="results">
-          <thead><tr><th>키</th><th>제목</th><th>유형</th><th>상태</th><th>우선순위</th><th>담당자</th><th>변경</th></tr></thead>
+          <thead><tr><th>{t('col.key')}</th><th>{t('col.title')}</th><th>{t('field.type')}</th><th>{t('field.status')}</th><th>{t('field.priority')}</th><th>{t('field.assignee')}</th><th>{t('col.updated')}</th></tr></thead>
           <tbody>
             {issues.map((i) => (
               <tr key={i.id}>
@@ -75,7 +76,7 @@ export function Search() {
             ))}
           </tbody>
         </table>
-        {next && <button onClick={() => run(q, next)}>더 보기</button>}
+        {next && <button onClick={() => run(q, next)}>{t('common.more')}</button>}
       </div>
     </div>
   )

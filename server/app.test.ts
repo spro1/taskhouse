@@ -8,9 +8,9 @@ import { join } from 'node:path'
 import { createApp } from './app.ts'
 import { openDb, type Db } from './db.ts'
 import { ensureSetupToken } from './auth.ts'
-import { pruneFiles, runJobs } from './jobs.ts'
+import { pruneFiles, runJobs, sealWebhookSecrets } from './jobs.ts'
 import { csvCell } from './export.ts'
-import { sendDigests } from './mail.ts'
+import { sendDigests, useTestTransport } from './mail.ts'
 import nodemailer from 'nodemailer'
 import { dateValue, hangulBigrams, koreanStem } from './search.ts'
 import { testDatabase } from './testdb.ts'
@@ -94,6 +94,11 @@ test('first run needs the setup token; then invites make accounts', async () => 
   assert.equal((await bob.call('GET', '/api/admin/users')).status, 403)
   assert.equal((await client().call('POST', '/api/auth/login', { email: 'bob@example.test', password: 'nope-nope' })).status, 401)
   assert.equal((await client().call('POST', '/api/auth/login', { email: 'bob@example.test', password: 'password1' })).status, 200)
+  // A sign-in lasts a day (SESSION_HOURS, default 24), in the database and in the cookie.
+  const r = await client().call('POST', '/api/auth/login', { email: 'bob@example.test', password: 'password1' })
+  assert.match(r.headers.get('set-cookie')!, /Max-Age=86400/)
+  const { hours } = (await db.query(`SELECT round(extract(epoch FROM max(expires_at) - now()) / 3600) AS hours FROM sessions WHERE user_id = $1`, [bobId])).rows[0]
+  assert.equal(Number(hours), 24)
 })
 
 test('project defaults, issue keys, field-level merge', async () => {
@@ -417,6 +422,7 @@ test('upgrade: later migrations apply to a database made by 0.1 (001 only) with 
 
 test('SSO: sign-in, groups, and every check that should refuse', async () => {
   let nonce = ''
+  let lastSecret: string | null = null
   let claims: Record<string, unknown> = {}
   const idp = createServer((req, res) => {
     const u = new URL(req.url!, 'http://idp')
@@ -426,6 +432,7 @@ test('SSO: sign-in, groups, and every check that should refuse', async () => {
     if (u.pathname === '/userinfo') return send({ sub: claims.sub, groups: claims.groups })
     let body = ''
     req.on('data', (d) => (body += d)).on('end', () => {
+      lastSecret = new URLSearchParams(body).get('client_secret')
       if (new URLSearchParams(body).get('code') !== 'good') return res.writeHead(400).end()
       const part = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url')
       send({ access_token: 'at', id_token: [part({ alg: 'none' }), part({ iss: issuer, aud: 'taskhouse', exp: Date.now() / 1000 + 60, nonce, ...claims }), ''].join('.') })
@@ -475,8 +482,51 @@ test('SSO: sign-in, groups, and every check that should refuse', async () => {
     process.env.PASSWORD_LOGIN = '0'
     assert.equal((await client().call('POST', '/api/auth/login', { email: 'admin@example.test', password: 'password1' })).status, 200)
     assert.equal((await client().json('POST', '/api/auth/login', { email: 'bob@example.test', password: 'password1' })).error, 'sso_only')
-  } finally {
+
+    // The same provider set up on the admin screen. Environment variables win, so first the screen is read-only.
+    assert.equal((await admin.json('PUT', '/api/admin/sso', { enabled: true, issuer, clientId: 'taskhouse' })).error, 'sso_env')
     for (const k of ['OIDC_ISSUER', 'OIDC_CLIENT_ID', 'OIDC_ADMIN_GROUP', 'PASSWORD_LOGIN']) delete process.env[k]
+    assert.equal((await client().json('GET', '/api/auth/state')).sso, null)
+    process.env.SECRET_KEY = 'test-secret-key'
+    assert.equal((await admin.json('PUT', '/api/admin/sso', { enabled: true, issuer: 'http://127.0.0.1:1', clientId: 'x' })).error, 'sso_discovery')
+    const saved = await admin.json('PUT', '/api/admin/sso', { enabled: true, issuer, clientId: 'taskhouse', clientSecret: 's3cret', label: '사내 SSO', groupsClaim: 'groups', adminGroup: 'th-admins' })
+    assert.equal(saved.source, 'admin')
+    assert.equal(saved.hasSecret, true)
+    assert.equal(saved.clientSecret, undefined) // never sent back
+    assert.match((await db.query(`SELECT value->>'clientSecret' AS s FROM settings WHERE key = 'sso'`)).rows[0].s, /^enc:v1:/)
+    assert.equal((await client().json('GET', '/api/auth/state')).sso.label, '사내 SSO')
+    const viaScreen = await sso({ sub: 's-9', email: 'erin@example.test', email_verified: true, groups: ['th-admins'] })
+    assert.equal(viaScreen.me.isAdmin, true)
+    assert.equal(lastSecret, 's3cret') // decrypted for the token request
+
+    // autoCreate / trustEmail. Settings saved before these options existed read as the defaults, which are the
+    // original behaviour: create accounts on first sign-in, link to an existing account only by a verified email.
+    await db.query(`UPDATE settings SET value = value - 'autoCreate' - 'trustEmail' WHERE key = 'sso'`)
+    const old = await admin.json('GET', '/api/admin/sso')
+    assert.equal(old.autoCreate, true)
+    assert.equal(old.trustEmail, false)
+    assert.match((await sso({ sub: 's-c', email: 'carol@example.test' })).to!, /sso_error=email_taken/) // no email_verified: not linked
+    // autoCreate off: newcomers are refused; people who already have an account still get in.
+    const base = { enabled: true, issuer, clientId: 'taskhouse', label: '사내 SSO' }
+    await admin.call('PUT', '/api/admin/sso', { ...base, autoCreate: false })
+    assert.match((await sso({ sub: 's-new', email: 'newbie@example.test', email_verified: true })).to!, /sso_error=no_account/)
+    assert.equal((await sso({ sub: 's-9', email: 'erin@example.test', email_verified: true })).me.email, 'erin@example.test')
+    // trustEmail: an IdP that never sends email_verified may link to the local account with that email;
+    // one that says false is still refused.
+    await admin.call('PUT', '/api/admin/sso', { ...base, trustEmail: true })
+    assert.equal((await admin.json('GET', '/api/admin/sso')).trustEmail, true)
+    assert.match((await sso({ sub: 's-c', email: 'carol@example.test', email_verified: false })).to!, /sso_error=email_taken/)
+    assert.match((await sso({ sub: 's-c', email: 'carol@example.test', email_verified: 'false' })).to!, /sso_error=email_taken/)
+    assert.equal((await sso({ sub: 's-c', email: 'carol@example.test' })).me.email, 'carol@example.test')
+    await admin.call('PUT', '/api/admin/sso', base)
+    // Saving again without a secret keeps the stored one.
+    await admin.call('PUT', '/api/admin/sso', { enabled: true, issuer, clientId: 'taskhouse', label: '사내 SSO' })
+    assert.equal((await admin.json('GET', '/api/admin/sso')).hasSecret, true)
+    assert.equal((await bob.call('GET', '/api/admin/sso')).status, 403)
+    await admin.call('PUT', '/api/admin/sso', { enabled: false, issuer, clientId: 'taskhouse' })
+    assert.equal((await client().json('GET', '/api/auth/state')).sso, null)
+  } finally {
+    for (const k of ['OIDC_ISSUER', 'OIDC_CLIENT_ID', 'OIDC_ADMIN_GROUP', 'PASSWORD_LOGIN', 'SECRET_KEY']) delete process.env[k]
     idp.close()
   }
 })
@@ -494,6 +544,101 @@ test('passwords: change with the current one, reset with an admin link', async (
   assert.equal((await bob.call('GET', '/api/me')).status, 401) // everyone signed out
   assert.equal((await bob.call('POST', '/api/auth/login', { email: 'bob@example.test', password: 'password3' })).status, 200)
   assert.equal((await bob.call('POST', `/api/admin/users/${dana.id}/reset-link`)).status, 403)
+})
+
+test('webhook signing keys are encrypted at rest and still sign the same', async () => {
+  const got: { sig: string; body: string }[] = []
+  const srv = createServer((req, res) => {
+    let b = ''
+    req.on('data', (d) => (b += d)).on('end', () => (got.push({ sig: String(req.headers['x-signature']), body: b }), res.end('ok')))
+  })
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r))
+  const url = `http://127.0.0.1:${(srv.address() as any).port}/x`
+  try {
+    // A key saved before SECRET_KEY existed stays usable, and is encrypted once SECRET_KEY is set.
+    const legacy = (await db.query(`INSERT INTO webhooks (project_id, url, secret, events) SELECT id, $1, 'plain-old-secret', '{issue.updated}' FROM projects WHERE key = 'DEMO' RETURNING id`, [url])).rows[0]
+    process.env.SECRET_KEY = 'test-secret-key'
+    const fresh = await admin.json('POST', '/api/projects/DEMO/webhooks', { url, events: ['issue.updated'] })
+    assert.match((await db.query('SELECT secret FROM webhooks WHERE id = $1', [fresh.id])).rows[0].secret, /^enc:v1:/)
+    assert.ok((await sealWebhookSecrets(db)) >= 1)
+    assert.equal(await sealWebhookSecrets(db), 0) // nothing left in plain text
+    assert.match((await db.query('SELECT secret FROM webhooks WHERE id = $1', [legacy.id])).rows[0].secret, /^enc:v1:/)
+    await db.query('UPDATE jobs SET done_at = now()')
+    await bob.call('PATCH', '/api/issues/DEMO-1', { priority: 3 })
+    await runJobs(db)
+    const mac = (key: string, body: string) => `sha256=${createHmac('sha256', key).update(body).digest('hex')}`
+    assert.equal(got.length, 2)
+    assert.ok(got.some((g) => g.sig === mac(fresh.secret, g.body)))
+    assert.ok(got.some((g) => g.sig === mac('plain-old-secret', g.body)))
+  } finally {
+    delete process.env.SECRET_KEY
+    await db.query('DELETE FROM webhooks WHERE url = $1', [url])
+    srv.close()
+  }
+})
+
+test('sign-in limits: per address and account, per address, per account; spoofed X-Forwarded-For does not help', async () => {
+  const login = (email: string, xff?: string) => app.request('/api/auth/login', {
+    method: 'POST', headers: { 'content-type': 'application/json', ...(xff ? { 'x-forwarded-for': xff } : {}) },
+    body: JSON.stringify({ email, password: 'wrong-password' }),
+  })
+  process.env.TRUST_PROXY = '1'
+  try {
+    // One proxy: the client is the last hop; whatever the client put to the left is ignored.
+    for (let i = 0; i < 10; i++) assert.equal((await login('target@example.test', `1.1.1.${i}, 10.0.0.1`)).status, 401)
+    const blocked = await login('target@example.test', '9.9.9.9, 10.0.0.1')
+    assert.equal(blocked.status, 429)
+    assert.equal(blocked.headers.get('retry-after'), '900')
+    // Another machine may still try that account (30 per account), and the first one other accounts (50 per address).
+    assert.equal((await login('target@example.test', '10.0.0.2')).status, 401)
+    assert.equal((await login('someone@example.test', '10.0.0.1')).status, 401)
+    for (let i = 0; i < 40; i++) await login(`spray${i}@example.test`, '10.0.0.1')
+    assert.equal((await login('fresh@example.test', '10.0.0.1')).status, 429) // the address is done
+  } finally {
+    delete process.env.TRUST_PROXY
+  }
+})
+
+test('forgot password (mail) and temporary passwords (admin)', async () => {
+  assert.equal((await client().json('POST', '/api/auth/forgot', { email: 'carol@example.test' })).error, 'mail_off')
+  const mails: any[] = []
+  const transport = nodemailer.createTransport({ jsonTransport: true })
+  transport.sendMail = (async (m: any) => (mails.push(m), {})) as any
+  useTestTransport(transport)
+  try {
+    assert.equal((await client().json('GET', '/api/auth/state')).forgot, true)
+    // Same answer with or without an account; only the real one gets mail.
+    assert.equal((await client().call('POST', '/api/auth/forgot', { email: 'nobody@example.test' })).status, 200)
+    assert.equal((await client().call('POST', '/api/auth/forgot', { email: 'Carol@example.test' })).status, 200)
+    assert.equal(mails.length, 1)
+    assert.equal(mails[0].to, 'carol@example.test')
+    assert.match(mails[0].subject, /비밀번호 재설정/)
+    const token = mails[0].text.match(/\/reset\/([\w-]+)/)[1]
+    assert.equal((await client().call('POST', `/api/auth/reset/${token}`, { password: 'carol-new-1' })).status, 200)
+    assert.equal((await client().call('POST', '/api/auth/login', { email: 'carol@example.test', password: 'carol-new-1' })).status, 200)
+    // In the account's language.
+    await carol.call('POST', '/api/auth/login', { email: 'carol@example.test', password: 'carol-new-1' })
+    await carol.call('PATCH', '/api/me', { locale: 'en' })
+    await client().call('POST', '/api/auth/forgot', { email: 'carol@example.test' })
+    assert.match(mails.at(-1).subject, /Reset your password/)
+    // Every request counts, so nobody gets flooded with mail.
+    for (let i = 0; i < 10; i++) await client().call('POST', '/api/auth/forgot', { email: 'flood@example.test' })
+    assert.equal((await client().call('POST', '/api/auth/forgot', { email: 'flood@example.test' })).status, 429)
+  } finally {
+    useTestTransport(null)
+  }
+
+  const carolId = (await admin.list('GET', '/api/admin/users')).find((u: any) => u.email === 'carol@example.test').id
+  assert.equal((await admin.call('POST', `/api/admin/users/${adminId}/temp-password`)).status, 400) // not yourself
+  const temp = await admin.json('POST', `/api/admin/users/${carolId}/temp-password`)
+  assert.match(temp.password, /^[a-zA-Z2-9]{12}$/)
+  assert.equal((await carol.call('GET', '/api/me')).status, 401) // signed out everywhere
+  assert.equal((await carol.call('POST', '/api/auth/login', { email: 'carol@example.test', password: 'carol-new-1' })).status, 401)
+  assert.equal((await carol.call('POST', '/api/auth/login', { email: 'carol@example.test', password: temp.password })).status, 200)
+  assert.equal((await carol.json('GET', '/api/me')).mustChangePassword, true)
+  assert.equal((await carol.call('POST', '/api/me/password', { current: temp.password, password: 'carol-own-1' })).status, 200)
+  assert.equal((await carol.json('GET', '/api/me')).mustChangePassword, false)
+  assert.ok((await admin.list('GET', '/api/admin/audit')).some((a: any) => a.action === 'user.temp_password'))
 })
 
 test('hardening: body size, cross-site requests, uploads, webhooks, export, input checks', async () => {

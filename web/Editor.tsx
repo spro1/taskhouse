@@ -5,6 +5,7 @@ import StarterKit from '@tiptap/starter-kit'
 import Mention from '@tiptap/extension-mention'
 import type { ReactNode } from 'react'
 import { api, type Ref } from './api.ts'
+import { t } from './i18n.ts'
 
 type Item = { id: number; label: string }
 
@@ -56,7 +57,7 @@ const mentionSuggestion = {
   },
 }
 
-export function Editor({ content, onSubmit, onCancel, submitLabel = '저장', placeholder }: {
+export function Editor({ content, onSubmit, onCancel, submitLabel = t('common.save'), placeholder }: {
   content?: any; onSubmit: (doc: any) => void; onCancel?: () => void; submitLabel?: string; placeholder?: string
 }) {
   const editor = useEditor({
@@ -65,7 +66,7 @@ export function Editor({ content, onSubmit, onCancel, submitLabel = '저장', pl
       Mention.configure({ HTMLAttributes: { class: 'mention' }, suggestion: mentionSuggestion as any }),
     ],
     content: content?.content?.length ? content : undefined,
-    editorProps: { attributes: { class: 'editor', 'aria-label': placeholder ?? '내용' } },
+    editorProps: { attributes: { class: 'editor', 'aria-label': placeholder ?? t('editor.content') } },
   })
   const submit = () => {
     if (!editor) return
@@ -74,7 +75,7 @@ export function Editor({ content, onSubmit, onCancel, submitLabel = '저장', pl
   return (
     <div className="editor-wrap" onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit() } }}>
       {editor && (
-        <div className="toolbar" role="toolbar" aria-label="서식">
+        <div className="toolbar" role="toolbar" aria-label={t('editor.toolbar')}>
           {([['B', 'bold', () => editor.chain().focus().toggleBold().run()], ['I', 'italic', () => editor.chain().focus().toggleItalic().run()],
             ['H', 'heading', () => editor.chain().focus().toggleHeading({ level: 3 }).run()], ['•', 'bulletList', () => editor.chain().focus().toggleBulletList().run()],
             ['1.', 'orderedList', () => editor.chain().focus().toggleOrderedList().run()], ['</>', 'codeBlock', () => editor.chain().focus().toggleCodeBlock().run()],
@@ -86,8 +87,8 @@ export function Editor({ content, onSubmit, onCancel, submitLabel = '저장', pl
       <EditorContent editor={editor} />
       <div className="inline">
         <button type="button" className="primary" onClick={submit}>{submitLabel}</button>
-        {onCancel && <button type="button" onClick={onCancel}>취소</button>}
-        <span className="muted small">@로 사람 멘션 · ⌘Enter로 {submitLabel}</span>
+        {onCancel && <button type="button" onClick={onCancel}>{t('common.cancel')}</button>}
+        <span className="muted small">{t('editor.hint', { action: submitLabel })}</span>
       </div>
     </div>
   )
