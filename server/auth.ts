@@ -65,8 +65,8 @@ export async function ensureSetupToken(db: Db) {
 // SSO comes from environment variables (they win, and make the admin screen read-only) or from Admin → SSO
 // (stored in settings, client secret encrypted with SECRET_KEY).
 // autoCreate: make an account on first SSO sign-in (off: only people with an account already linked, or linkable by email).
-// trustEmail: treat an email the IdP doesn't mark verified as verified when linking to an existing account, for IdPs that
-// never send email_verified (some Entra ID setups). Defaults keep the original behaviour: create, and link only verified.
+// trustEmail: treat an email the IdP doesn't mark verified as verified when linking to an existing account or creating one,
+// for IdPs that never send email_verified (some Entra ID setups). Both need a verified email, as in Pagehouse.
 type SsoSettings = {
   enabled: boolean; issuer: string; clientId: string; clientSecret: string; label: string; groupsClaim: string; adminGroup: string
   passwordLogin: boolean; autoCreate: boolean; trustEmail: boolean
@@ -312,7 +312,7 @@ export function registerAuth(app: Hono<Env>, db: Db) {
       const all = { ...claims, ...(info?.sub === claims.sub ? info : {}) }
       const sub = String(claims.sub ?? '')
       const email = typeof all.email === 'string' ? all.email.toLowerCase() : ''
-      // Only for linking an existing account by email. trustEmail covers a missing claim only: any other value that
+      // Needed to link an existing account by email or to create one. trustEmail covers a missing claim only: any other value that
       // isn't true / "true" (false, "false", ...) means not verified, whatever the setting.
       const verified = all.email_verified === true || all.email_verified === 'true' || (cfg.trustEmail && all.email_verified == null)
       if (!sub) return back('failed')
@@ -327,7 +327,7 @@ export function registerAuth(app: Hono<Env>, db: Db) {
         if (!u && email && verified) u = (await q.query('UPDATE users SET oidc_sub = $2 WHERE email = $1 AND oidc_sub IS NULL RETURNING id, disabled_at', [email, sub])).rows[0]
         if (!u) {
           if (!cfg.autoCreate) return 'no_account'
-          if (!email) return 'no_email'
+          if (!email || !verified) return 'no_email'
           u = (await q.query(`INSERT INTO users (email, name, oidc_sub) VALUES ($1, $2, $3) ON CONFLICT (email) DO NOTHING RETURNING id, disabled_at`, [email, name, sub])).rows[0]
           if (!u) return 'email_taken'
         }

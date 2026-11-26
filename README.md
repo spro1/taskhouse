@@ -55,6 +55,8 @@ scripts/upgrade.sh               # preupgrade-… 백업 → 새 이미지 → �
 - `.env`에 `SECRET_KEY`(긴 무작위 문자열)를 추가하고 재시작하세요. 이미 저장된 웹훅 서명 키는 시작할 때 암호화되고, 받는 쪽은 바꿀 것이 없습니다.
   `SECRET_KEY`가 없어도 지금처럼 동작합니다(평문 저장). 한 번 설정한 뒤 잃어버리면 웹훅 서명 키와 SSO 클라이언트 비밀을 다시 만들어야 합니다.
 - 로그인 세션의 기본 수명이 24시간으로 바뀌었습니다. 다만 기존 설치는 `.env`에 `SESSION_HOURS=12`가 적혀 있어 12시간으로 남습니다. 새 기본값을 쓰려면 그 줄을 `24`로 고치거나 지우고 재시작하세요(새 로그인부터 적용).
+- SSO로 새 계정을 만들 때도 IdP가 확인한 이메일이 필요합니다(Pagehouse와 같은 기준). `email_verified`를 보내지 않는 IdP를 쓰면 업그레이드 뒤 새 사용자가 SSO로 들어오지 못합니다(`no_email`).
+  그런 IdP라면 `.env`에 `OIDC_TRUST_EMAIL=1`을 넣거나 관리 → SSO에서 "확인 표시를 하지 않은 이메일도 믿기"를 켜세요. 이미 계정이 있는 사람은 영향이 없습니다.
 - `TRUST_PROXY`는 앞단 프록시 수입니다. 기존 `1`은 그대로 "프록시 1단"입니다. 이제 `X-Forwarded-For`의 오른쪽에서부터 세므로 클라이언트가 이 헤더를 꾸며도 로그인 제한을 피할 수 없습니다.
 
 ### 이미지와 취약점
@@ -76,8 +78,9 @@ DB는 UTF-8 로캘(`en_US.UTF-8`)로 초기화합니다. `C` 로캘이나 PG17 b
 관리 → SSO 화면에서 설정하거나(클라이언트 비밀은 `SECRET_KEY`로 암호화해 저장), `.env`에 `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`을 넣습니다(환경변수가 있으면 그쪽이 우선이고 화면은 읽기 전용). 그리고 IdP에는 리다이렉트 URI `$PUBLIC_URL/api/auth/oidc/callback`과
 로그아웃 후 이동 주소 `$PUBLIC_URL/`을 등록합니다. 그룹은 `groups` 클레임(`OIDC_GROUPS_CLAIM`)에서 로그인할 때마다 가져오고,
 `OIDC_ADMIN_GROUP` 구성원은 사이트 관리자가 됩니다. 로그아웃하면 IdP 세션도 끝납니다.
-계정은 IdP의 `sub`로 찾고, 처음 로그인하면 계정을 만듭니다(`OIDC_AUTO_CREATE=0`이면 만들지 않음). 같은 이메일의 기존 로컬 계정에는 IdP가 확인한
-이메일일 때만 연결합니다. `email_verified`를 보내지 않는 IdP라면 `OIDC_TRUST_EMAIL=1`로 연결을 허용할 수 있습니다(IdP가 `false`라고 하면 여전히 거부).
+계정은 IdP의 `sub`로 찾습니다. 처음 로그인하면 같은 이메일의 기존 로컬 계정에 연결하거나 새 계정을 만드는데(`OIDC_AUTO_CREATE=0`이면 만들지 않음),
+둘 다 IdP가 확인한 이메일(`email_verified`)일 때만 합니다. `email_verified`를 보내지 않는 IdP라면 `OIDC_TRUST_EMAIL=1`로 허용할 수 있습니다(IdP가 `false`라고 하면 여전히 거부).
+이미 `sub`로 연결된 사람은 이메일 확인 여부와 상관없이 로그인합니다.
 `PASSWORD_LOGIN=0`(SSO 전용)이어도 비밀번호가 있는 관리자는 로그인 화면의 "관리자 비상 로그인"으로 들어올 수 있습니다.
 
 Keycloak 26으로 확인했습니다. 로컬에서 직접 해 보려면 `scripts/keycloak-dev.sh`가 테스트용 Keycloak(realm·client·그룹 매퍼·테스트 사용자)을 띄웁니다.

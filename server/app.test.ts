@@ -472,7 +472,13 @@ test('SSO: sign-in, groups, and every check that should refuse', async () => {
     assert.match((await sso({ sub: 's-2', email: 'e@example.test', email_verified: true, aud: 'another-app' })).to!, /sso_error=failed/)
     assert.match((await sso({ sub: 's-2', email: 'e@example.test', email_verified: true }, { code: 'bad' })).to!, /sso_error=failed/)
     // An unverified email never takes over an existing account.
-    assert.match((await sso({ sub: 's-2', email: 'bob@example.test', email_verified: false })).to!, /sso_error=email_taken/)
+    assert.match((await sso({ sub: 's-2', email: 'bob@example.test', email_verified: false })).to!, /sso_error=no_email/)
+    // A newcomer needs a verified email too: no account is made without one.
+    assert.match((await sso({ sub: 's-u', email: 'unverified@example.test' })).to!, /sso_error=no_email/)
+    assert.match((await sso({ sub: 's-u', email: 'unverified@example.test', email_verified: 'false' })).to!, /sso_error=no_email/)
+    assert.equal((await db.query(`SELECT 1 FROM users WHERE email = 'unverified@example.test'`)).rowCount, 0)
+    // Someone already linked by sub gets in whatever the email claim says.
+    assert.equal((await sso({ sub: 's-1', email: 'dana@example.test', email_verified: false })).me.email, 'dana@example.test')
 
     // The setup admin signs in with SSO once (linked by verified email) and isn't in the admin group: still admin,
     // and still the break-glass account when passwords are switched off.
@@ -500,24 +506,25 @@ test('SSO: sign-in, groups, and every check that should refuse', async () => {
     assert.equal(lastSecret, 's3cret') // decrypted for the token request
 
     // autoCreate / trustEmail. Settings saved before these options existed read as the defaults, which are the
-    // original behaviour: create accounts on first sign-in, link to an existing account only by a verified email.
+    // original behaviour: create accounts on first sign-in, link or create only with a verified email.
     await db.query(`UPDATE settings SET value = value - 'autoCreate' - 'trustEmail' WHERE key = 'sso'`)
     const old = await admin.json('GET', '/api/admin/sso')
     assert.equal(old.autoCreate, true)
     assert.equal(old.trustEmail, false)
-    assert.match((await sso({ sub: 's-c', email: 'carol@example.test' })).to!, /sso_error=email_taken/) // no email_verified: not linked
+    assert.match((await sso({ sub: 's-c', email: 'carol@example.test' })).to!, /sso_error=no_email/) // no email_verified: not linked
     // autoCreate off: newcomers are refused; people who already have an account still get in.
     const base = { enabled: true, issuer, clientId: 'taskhouse', label: '사내 SSO' }
     await admin.call('PUT', '/api/admin/sso', { ...base, autoCreate: false })
     assert.match((await sso({ sub: 's-new', email: 'newbie@example.test', email_verified: true })).to!, /sso_error=no_account/)
     assert.equal((await sso({ sub: 's-9', email: 'erin@example.test', email_verified: true })).me.email, 'erin@example.test')
-    // trustEmail: an IdP that never sends email_verified may link to the local account with that email;
+    // trustEmail: an IdP that never sends email_verified may link to the local account with that email or create one;
     // one that says false is still refused.
     await admin.call('PUT', '/api/admin/sso', { ...base, trustEmail: true })
     assert.equal((await admin.json('GET', '/api/admin/sso')).trustEmail, true)
-    assert.match((await sso({ sub: 's-c', email: 'carol@example.test', email_verified: false })).to!, /sso_error=email_taken/)
-    assert.match((await sso({ sub: 's-c', email: 'carol@example.test', email_verified: 'false' })).to!, /sso_error=email_taken/)
+    assert.match((await sso({ sub: 's-c', email: 'carol@example.test', email_verified: false })).to!, /sso_error=no_email/)
+    assert.match((await sso({ sub: 's-c', email: 'carol@example.test', email_verified: 'false' })).to!, /sso_error=no_email/)
     assert.equal((await sso({ sub: 's-c', email: 'carol@example.test' })).me.email, 'carol@example.test')
+    assert.equal((await sso({ sub: 's-u', email: 'unverified@example.test' })).me.email, 'unverified@example.test') // created
     await admin.call('PUT', '/api/admin/sso', base)
     // Saving again without a secret keeps the stored one.
     await admin.call('PUT', '/api/admin/sso', { enabled: true, issuer, clientId: 'taskhouse', label: '사내 SSO' })
