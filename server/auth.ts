@@ -344,6 +344,9 @@ export function registerAuth(app: Hono<Env>, db: Db) {
           }
           // The admin group grants admin; it never takes it from an admin with a password (the break-glass account).
           if (cfg.adminGroup) await q.query(`UPDATE users SET is_admin = $2 OR (is_admin AND password_hash <> '') WHERE id = $1`, [u.id, groups.includes(cfg.adminGroup)])
+          // Accounts shared with Pagehouse: this one SSO sign-in covers both products, so the admin group sets its role too.
+          if (cfg.adminGroup && (await q.query(`SELECT 1 FROM information_schema.columns WHERE table_schema = 'accounts' AND table_name = 'users' AND column_name = 'role'`)).rowCount)
+            await q.query(`UPDATE users SET role = CASE WHEN $2 THEN 'admin' WHEN role = 'admin' AND password_hash = '' THEN 'member' ELSE role END WHERE id = $1`, [u.id, groups.includes(cfg.adminGroup)])
         }
         return u.id as number
       })
