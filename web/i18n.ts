@@ -16,7 +16,7 @@ const ko = {
   'temp.title': '비밀번호를 새로 정하세요', 'temp.sub': '{name}님은 관리자가 발급한 임시 비밀번호로 로그인했습니다. 계속하려면 직접 비밀번호를 정하세요.', 'temp.current': '임시 비밀번호',
   'sso.err.unavailable': 'SSO 서버에 연결할 수 없습니다. 잠시 뒤에 다시 시도하거나 관리자에게 알려 주세요.', 'sso.err.account_disabled': '비활성화된 계정입니다. 관리자에게 문의하세요.',
   'sso.err.email_taken': '같은 이메일의 계정이 이미 있는데, SSO에서 이메일이 확인되지 않아 연결하지 않았습니다. 관리자에게 문의하세요.',
-  'sso.err.no_email': 'SSO 계정에 이메일이 없어 계정을 만들 수 없습니다.', 'sso.err.no_account': '아직 계정이 없습니다. 관리자에게 초대를 요청하세요.', 'sso.err.failed': 'SSO 로그인에 실패했습니다. 다시 시도해 주세요.',
+  'sso.err.no_email': 'SSO 서버가 확인된 이메일을 주지 않아 계정을 만들 수 없습니다.', 'sso.err.no_account': '아직 계정이 없습니다. 관리자에게 초대를 요청하세요.', 'sso.err.failed': 'SSO 로그인에 실패했습니다. 다시 시도해 주세요.',
 
   'nav.quick': '검색 또는 이슈 키', 'nav.search': '고급 검색', 'nav.notifications': '알림', 'nav.admin': '관리', 'nav.logout': '로그아웃',
   'home.projects': '프로젝트', 'home.noProjects': '아직 프로젝트가 없습니다.', 'home.key': '키 (예: DEMO)', 'home.newProject': '새 프로젝트', 'home.mine': '{name}님의 미완료 이슈',
@@ -93,7 +93,7 @@ const ko = {
   'sso.passwordLogin.hint': '끄면 관리자를 제외한 모두가 SSO로만 로그인합니다(관리자는 IdP 장애 때 비상 로그인으로 들어올 수 있습니다).',
   'sso.autoCreate': '처음 SSO로 로그인할 때 계정 만들기', 'sso.autoCreate.hint': '끄면 이미 계정이 있는 사람(같은 이메일의 계정 포함)만 로그인할 수 있습니다.',
   'sso.trustEmail': 'IdP가 확인 표시를 하지 않은 이메일도 믿기',
-  'sso.trustEmail.hint': '같은 이메일의 기존 계정에 연결할 때만 쓰입니다. email_verified를 아예 보내지 않는 IdP(일부 Entra ID 설정)에서, 사용자가 IdP에서 자기 이메일을 바꿀 수 없을 때만 켜세요.',
+  'sso.trustEmail.hint': '같은 이메일의 기존 계정에 연결하거나 새 계정을 만들 때 쓰입니다. email_verified를 아예 보내지 않는 IdP(일부 Entra ID 설정)에서, 사용자가 IdP에서 자기 이메일을 바꿀 수 없을 때만 켜세요.',
   'sso.enable': 'SSO 켜기', 'sso.disable': '끄기', 'sso.saved.on': 'SSO를 켰습니다.', 'sso.saved.off': 'SSO를 껐습니다.',
 
   'err.bad_credentials': '이메일 또는 비밀번호가 맞지 않습니다.', 'err.too_many_attempts': '시도가 너무 많습니다. 15분 뒤에 다시 해 주세요.',
@@ -132,7 +132,7 @@ const en: Dict = {
   'temp.title': 'Choose your own password', 'temp.sub': '{name}, you signed in with a temporary password from an administrator. Set your own to continue.', 'temp.current': 'Temporary password',
   'sso.err.unavailable': "The sign-on provider can't be reached. Try again shortly or tell an administrator.", 'sso.err.account_disabled': 'This account is disabled. Contact an administrator.',
   'sso.err.email_taken': "An account with this email already exists, and the sign-on provider didn't confirm the email, so they weren't linked. Contact an administrator.",
-  'sso.err.no_email': "The sign-on account has no email, so no account can be created.", 'sso.err.no_account': "There is no account for you yet. Ask an administrator for an invite.", 'sso.err.failed': 'Single sign-on failed. Try again.',
+  'sso.err.no_email': "The sign-on provider did not share a verified email, so no account can be created.", 'sso.err.no_account': "There is no account for you yet. Ask an administrator for an invite.", 'sso.err.failed': 'Single sign-on failed. Try again.',
 
   'nav.quick': 'Search or issue key', 'nav.search': 'Advanced search', 'nav.notifications': 'Notifications', 'nav.admin': 'Admin', 'nav.logout': 'Sign out',
   'home.projects': 'Projects', 'home.noProjects': 'No projects yet.', 'home.key': 'Key (e.g. DEMO)', 'home.newProject': 'New project', 'home.mine': 'Open issues for {name}',
@@ -209,7 +209,7 @@ const en: Dict = {
   'sso.passwordLogin.hint': 'Off: everyone but administrators must use SSO (admins keep an emergency way in if the provider is down).',
   'sso.autoCreate': 'Create accounts on first sign-in', 'sso.autoCreate.hint': 'Off: only people who already have an account (including one with the same email) can sign in.',
   'sso.trustEmail': "Trust emails the provider doesn't mark verified",
-  'sso.trustEmail.hint': "Used only to link to an existing account with the same email. Only for providers that never send email_verified (some Entra ID setups), and only if users can't change their own email there.",
+  'sso.trustEmail.hint': "Used to link to an existing account with the same email and to create new accounts. Only for providers that never send email_verified (some Entra ID setups), and only if users can't change their own email there.",
   'sso.enable': 'Turn on SSO', 'sso.disable': 'Turn off', 'sso.saved.on': 'SSO is on.', 'sso.saved.off': 'SSO is off.',
 
   'err.bad_credentials': "The email or password isn't right.", 'err.too_many_attempts': 'Too many attempts. Try again in 15 minutes.',
