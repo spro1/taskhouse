@@ -1,0 +1,16 @@
+node_modules
+dist
+data
+backups
+.env
+.testdb
+.devdb
+dist-bundle
+taskhouse-*.tar.gz
+
+# Internal design documents (kept locally, not published)
+*.docx
+*.pdf
+media/
+경량-JIRA-대체-설계서.md
+.devdata
