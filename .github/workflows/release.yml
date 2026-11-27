@@ -89,14 +89,19 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # The bundle's compose file uses the local image names, so tag the published images that way.
+      # The bundle's compose file uses the local image names, so save the published images under them.
+      # `docker save` of a multi-arch image pulled for another platform fails on missing manifests, so skopeo
+      # (preinstalled on GitHub runners) copies exactly the platform we want, as Pagehouse's release does;
+      # load + save then joins both into the one images.tar that install.sh takes.
       - name: Save ${{ matrix.arch }} images
+        env:
+          CREDS: ${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}
         run: |
           img=${{ needs.meta.outputs.image }}
-          docker pull --platform linux/${{ matrix.arch }} "$img:${{ needs.meta.outputs.version }}"
-          docker pull --platform linux/${{ matrix.arch }} "$img-postgres:17"
-          docker tag "$img:${{ needs.meta.outputs.version }}" localhost/taskhouse:latest
-          docker tag "$img-postgres:17" localhost/taskhouse-postgres:17
+          copy() { skopeo copy --src-creds "$CREDS" --override-os linux --override-arch ${{ matrix.arch }} "docker://$1" "docker-archive:$2:$3"; }
+          copy "$img:${{ needs.meta.outputs.version }}" app.tar localhost/taskhouse:latest
+          copy "$img-postgres:17" db.tar localhost/taskhouse-postgres:17
+          docker load -i app.tar && docker load -i db.tar && rm app.tar db.tar
           docker save -o images.tar localhost/taskhouse:latest localhost/taskhouse-postgres:17
       - name: Build bundle
         run: |
