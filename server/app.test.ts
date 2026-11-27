@@ -15,6 +15,7 @@ import nodemailer from 'nodemailer'
 import { dateValue, hangulBigrams, koreanStem } from './search.ts'
 import { testDatabase } from './testdb.ts'
 import { parseTql } from './tql.ts'
+import { fromMarkdown, toMarkdown } from './mcp.ts'
 import { serve } from '@hono/node-server'
 import WebSocket from 'ws'
 import pg from 'pg'
@@ -190,6 +191,12 @@ test('workflow rules: conditions, validators, post functions', async () => {
   // A status still used by issues can't be dropped.
   const dropped = await admin.json('PUT', '/api/projects/DEMO/workflow', { statuses: proj.statuses.filter((s: any) => s.name !== '리뷰 중'), transitions: [] })
   assert.equal(dropped.error, 'status_in_use')
+  // A status can be left off the board; at least one must stay on it.
+  const offBoard = (await admin.json('GET', '/api/projects/DEMO')).statuses.map((x: any) => ({ ...x, onBoard: x.category !== 1 }))
+  assert.equal((await admin.call('PUT', '/api/projects/DEMO/workflow', { statuses: offBoard, transitions: [] })).status, 200)
+  assert.deepEqual((await admin.json('GET', '/api/projects/DEMO')).statuses.filter((x: any) => !x.onBoard).map((x: any) => x.category), offBoard.filter((x: any) => !x.onBoard).map((x: any) => x.category))
+  assert.equal((await admin.call('PUT', '/api/projects/DEMO/workflow', { statuses: offBoard.map((x: any) => ({ ...x, onBoard: false })), transitions: [] })).status, 400)
+  assert.equal((await admin.call('PUT', '/api/projects/DEMO/workflow', { statuses: offBoard.map((x: any) => ({ ...x, onBoard: true })), transitions: [] })).status, 200)
   // Renaming keeps issues on the same status; back to the free workflow.
   const renamed = proj.statuses.map((s: any) => (s.name === '리뷰 중' ? { ...s, name: '검토' } : s))
   assert.equal((await admin.call('PUT', '/api/projects/DEMO/workflow', { statuses: renamed, transitions: [] })).status, 200)
@@ -708,7 +715,91 @@ test('hardening: body size, cross-site requests, uploads, webhooks, export, inpu
   assert.equal(files(), kept - 1)
 })
 
+test('monitoring: admin only, health and stats, Prometheus only with METRICS_TOKEN', async () => {
+  assert.equal((await bob.call('GET', '/api/admin/health')).status, 403)
+  assert.equal((await bob.call('GET', '/api/admin/stats')).status, 403)
+  const h = await admin.json('GET', '/api/admin/health')
+  assert.equal(h.http, 200)
+  assert.ok(h.db.latencyMs >= 0 && h.recent.requests > 0 && h.counts.issues > 0)
+  const s = await admin.json('GET', '/api/admin/stats')
+  assert.ok(s.counts.projects >= 1 && s.projects.some((p: any) => p.key === 'DEMO'))
+  assert.equal(s.activity.length, 14)
+  assert.ok(s.storage.dbBytes > 0)
+  assert.equal((await app.request('/metrics')).status, 404) // off by default
+  process.env.METRICS_TOKEN = 'scrape-secret'
+  try {
+    assert.equal((await app.request('/metrics', { headers: { authorization: 'Bearer wrong' } })).status, 401)
+    const m = await app.request('/metrics', { headers: { authorization: 'Bearer scrape-secret' } })
+    const text = await m.text()
+    assert.match(text, /taskhouse_http_requests_total\{method="GET",route="\/api\/admin\/health",status="200"\} \d+/)
+    assert.match(text, /taskhouse_issues \d+/)
+    assert.doesNotMatch(text, /DEMO-\d/) // routes are shapes, never keys
+  } finally {
+    delete process.env.METRICS_TOKEN
+  }
+})
+
+test('MCP: tools act as the token owner, with their permissions', async () => {
+  const { token } = await bob.json('POST', '/api/me/tokens', { name: 'mcp', days: 30 })
+  const rpc = async (method: string, params?: unknown, bearer = token) => {
+    const r = await app.request('/api/mcp', { method: 'POST', headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) })
+    return { status: r.status, ...(await r.json().catch(() => ({}))) }
+  }
+  const tool = async (name: string, args: unknown) => (await rpc('tools/call', { name, arguments: args })).result
+  assert.equal((await rpc('initialize', { protocolVersion: '2025-06-18' }, 'th_nope')).status, 401)
+  assert.equal((await rpc('initialize', { protocolVersion: '2025-06-18' })).result.serverInfo.name, 'taskhouse')
+  assert.ok((await rpc('tools/list')).result.tools.some((t: any) => t.name === 'search_issues'))
+  assert.match((await tool('list_projects', {})).content[0].text, /DEMO: /)
+  const made = await tool('create_issue', { project: 'DEMO', title: 'MCP로 만든 이슈', type: '버그', priority: 1, description: '재현 방법:\n\n- 로그인\n- **저장** 클릭' })
+  const key = made.content[0].text.match(/DEMO-\d+/)[0]
+  const got = (await tool('get_issue', { key })).content[0].text
+  assert.match(got, /type: 버그/)
+  assert.match(got, /- \*\*저장\*\* 클릭/)
+  assert.match((await tool('search_issues', { tql: `key = ${key}` })).content[0].text, new RegExp(key))
+  assert.match((await tool('update_issue', { key, assignee: 'bob@example.test', points: 3 })).content[0].text, /assignee, points/)
+  assert.equal((await bob.json('GET', `/api/issues/${key}`)).assignee.id, bobId)
+  const moved = await tool('transition_issue', { key, status: '진행 중' })
+  assert.match(moved.content[0].text, /진행 중/)
+  const wrong = await tool('transition_issue', { key, status: '없는 상태' })
+  assert.equal(wrong.isError, true)
+  assert.match(wrong.content[0].text, /Allowed: /)
+  await tool('add_comment', { key, body: '확인했습니다' })
+  assert.match((await tool('get_comments', { key })).content[0].text, /확인했습니다/)
+  // Nothing beyond the token owner's rights: a project bob can't see is "not found", as in the REST API.
+  assert.equal((await tool('get_issue', { key: 'SECRET-1' })).isError, true)
+  assert.equal((await rpc('tools/call', { name: 'drop_database', arguments: {} })).error.code, -32602)
+})
+
+test('profile: photos (upload, serve, other types refused, cleanup keeps them) and theme', async () => {
+  const png = Buffer.from('89504e470d0a1a0a0000000d4948445200000001000000010806000000', 'hex')
+  const put = (type: string, bytes: Buffer = png) => {
+    const form = new FormData()
+    form.append('file', new File([new Uint8Array(bytes)], 'a', { type }))
+    return app.request('/api/me/avatar', { method: 'PUT', headers: { cookie: carol.cookie }, body: form })
+  }
+  assert.equal((await put('image/svg+xml')).status, 400) // scripts can hide in SVG
+  assert.equal((await put('image/png', Buffer.alloc(1024 * 1024 + 1))).status, 413)
+  assert.equal((await carol.call('GET', `/api/users/${carolId}/avatar`)).status, 404)
+  assert.equal((await put('image/png')).status, 200)
+  assert.equal((await carol.json('GET', '/api/me')).avatar, true)
+  const r = await bob.call('GET', `/api/users/${carolId}/avatar`) // anyone signed in sees it
+  assert.equal(r.headers.get('content-type'), 'image/png')
+  assert.deepEqual(Buffer.from(await r.arrayBuffer()), png)
+  assert.equal((await client().call('GET', `/api/users/${carolId}/avatar`)).status, 401)
+  // The cleanup of unused attachment files must not take the photo (an old file is cleaned only after an hour).
+  await pruneFiles(db, join(dataDir, 'files'), Date.now() + 2 * 3600_000)
+  assert.equal((await bob.call('GET', `/api/users/${carolId}/avatar`)).status, 200)
+  assert.equal((await carol.call('DELETE', '/api/me/avatar')).status, 200)
+  // The theme is kept on the account, as in Pagehouse.
+  assert.equal((await carol.json('GET', '/api/me')).theme, null)
+  assert.equal((await carol.call('PATCH', '/api/me', { theme: 'dark' })).status, 200)
+  assert.equal((await carol.json('GET', '/api/me')).theme, 'dark')
+  assert.equal((await carol.call('PATCH', '/api/me', { theme: 'neon' })).status, 400)
+  assert.equal((await bob.call('GET', `/api/users/${carolId}/avatar`)).status, 404)
+})
+
 test('helpers', () => {
+  assert.equal(toMarkdown(fromMarkdown('# 제목\n\n문단 `코드` [링크](https://example.com)\n\n1. 하나\n2. 둘\n\n```\nx = 1\n```')), '### 제목\n\n문단 `코드` [링크](https://example.com)\n\n1. 하나\n2. 둘\n\n```\nx = 1\n```')
   assert.deepEqual(parseTql('text ~ b', new Date()).sort, [])
   assert.deepEqual(parseTql('status = 완료 AND NOT (type = 버그 OR priority > 2) ORDER BY rank').query,
     { and: [{ field: 'status', op: '=', value: '완료' }, { not: { or: [{ field: 'type', op: '=', value: '버그' }, { field: 'priority', op: '>', value: 2 }] } }] })

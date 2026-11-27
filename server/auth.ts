@@ -380,13 +380,14 @@ export function registerAuth(app: Hono<Env>, db: Db) {
 
   app.get('/api/me', async (c) =>
     c.json({ ...c.get('user'), ...(await one(`SELECT email_notify AS "emailNotify", password_hash <> '' AS "hasPassword",
-      must_change_password AS "mustChangePassword", locale FROM users WHERE id = $1`, [c.get('user').id])), mail: !!mailer() }))
+      must_change_password AS "mustChangePassword", locale, theme, avatar IS NOT NULL AS avatar FROM users WHERE id = $1`, [c.get('user').id])), mail: !!mailer() }))
   app.patch('/api/me', async (c) => {
     const b = await body(c)
     const notify = typeof b.emailNotify === 'boolean' ? b.emailNotify : null
     const locale = b.locale === 'ko' || b.locale === 'en' ? b.locale : null
-    if (notify === null && locale === null) return fail(c, 400, 'bad_request')
-    await db.query('UPDATE users SET email_notify = COALESCE($2, email_notify), locale = COALESCE($3, locale) WHERE id = $1', [c.get('user').id, notify, locale])
+    const theme = ['system', 'light', 'dark'].includes(b.theme) ? b.theme : null
+    if (notify === null && locale === null && theme === null) return fail(c, 400, 'bad_request')
+    await db.query('UPDATE users SET email_notify = COALESCE($2, email_notify), locale = COALESCE($3, locale), theme = COALESCE($4, theme) WHERE id = $1', [c.get('user').id, notify, locale, theme])
     return c.json({ ok: true })
   })
 

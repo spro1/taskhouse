@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { DocView, Editor } from './Editor.tsx'
 import { api, ApiError, message, PRIORITIES, subscribe, type Issue, type Project, type Ref } from './api.ts'
 import { IssueList, Link, nav, toast, type Me } from './App.tsx'
 import { t, type Key } from './i18n.ts'
+import { Avatar, Icon, PriorityIcon, TypeIcon } from './icons.tsx'
+import { Select } from './Select.tsx'
 
 type Related = { children: Issue[]; links: { kind: string; outward: boolean; key: string; title: string; status: string; category: number }[]; attachments: { id: number; name: string; size: number }[]; watching: boolean }
 const LINK_TEXT: Record<string, [Key, Key]> = { blocks: ['link.blocks', 'link.blockedBy'], relates: ['link.relates', 'link.relates'], duplicates: ['link.duplicates', 'link.duplicatedBy'] }
@@ -12,7 +14,8 @@ const FIELD_NAMES: Record<string, Key> = {
 }
 const show = (v: any): string => (v === null || v === undefined ? t('common.empty') : Array.isArray(v) ? v.join(', ') || t('common.empty') : typeof v === 'object' ? v.name ?? JSON.stringify(v) : String(v))
 
-export function IssueView({ issueKey, me }: { issueKey: string; me: Me }) {
+// `panel`: shown in the side panel next to a board or backlog, in one column.
+export function IssueView({ issueKey, me, panel = false }: { issueKey: string; me: Me; panel?: boolean }) {
   const [issue, setIssue] = useState<Issue | null>()
   const [project, setProject] = useState<Project>()
   const [related, setRelated] = useState<Related>()
@@ -23,6 +26,9 @@ export function IssueView({ issueKey, me }: { issueKey: string; me: Me }) {
   const [users, setUsers] = useState<Ref[]>([])
   const [editingDesc, setEditingDesc] = useState(false)
   const [commentKey, setCommentKey] = useState(0)
+  const [adding, setAdding] = useState<'child' | 'link' | null>(null)
+  const [menu, setMenu] = useState(false)
+  const file = useRef<HTMLInputElement>(null)
   const base = `/api/issues/${issueKey}`
 
   const load = async () => {
@@ -61,16 +67,101 @@ export function IssueView({ issueKey, me }: { issueKey: string; me: Me }) {
   const act = (p: Promise<unknown>) => p.then(load, (e) => toast(message(e)))
   const sprintChoices = project.sprints
 
+  const done = related.children.filter((c) => c.status.category === 2).length
+  const upload = (f?: File) => {
+    if (!f) return
+    const form = new FormData()
+    form.append('file', f)
+    act(api('POST', `${base}/attachments`, form))
+  }
+
+  const side = (
+    <>
+        <div className="side-top">
+          <Select className={`status-select c${issue.status.category}`} label={t('field.status')} disabled={!canEdit || !moves.length} value={issue.status.id}
+            options={[{ value: issue.status.id, label: issue.status.name }, ...moves.map((m) => ({ value: m.to.id, label: m.to.name, hint: m.name === m.to.name ? undefined : m.name }))]}
+            onChange={(to) => act(api('POST', `${base}/transitions`, { to, lockVersion: issue.lockVersion }))} />
+          <span className="grow" />
+          <button className={`ghost ${related.watching ? 'on' : ''}`} aria-pressed={related.watching} onClick={() => act(api(related.watching ? 'DELETE' : 'POST', `${base}/watch`))}>
+            <Icon name="eye" /> {related.watching ? t('issue.unwatch') : t('issue.watch')}
+          </button>
+          {canEdit && (
+            <div className="menu-wrap">
+              <button className="ghost icon" aria-label={t('issue.moreActions')} aria-expanded={menu} onClick={() => setMenu(!menu)}><Icon name="more" /></button>
+              {menu && (
+                <div className="dropdown" role="menu">
+                  <button role="menuitem" className="danger" onClick={() => { setMenu(false); if (confirm(t('issue.deleteConfirm', { key: issue.key }))) api('DELETE', base).then(() => nav(`/p/${project.key}`), (e) => toast(message(e))) }}>
+                    <Icon name="trash" /> {t('common.delete')}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <section className="details">
+          <h3>{t('issue.details')}</h3>
+          <div className="fields">
+            <span>{t('field.assignee')}</span>
+            <Select label={t('field.assignee')} disabled={!canEdit} value={issue.assignee?.id ?? 0}
+              options={[{ value: 0, label: t('board.unassigned'), icon: <Avatar user={null} size="sm" /> },
+                ...(issue.assignee && !users.some((u) => u.id === issue.assignee!.id) ? [issue.assignee] : []).concat(users).map((u) => ({ value: u.id, label: u.name, icon: <Avatar user={u} size="sm" /> }))]}
+              onChange={(v) => save('assignee', v || null)} />
+            {canEdit && issue.assignee?.id !== me.id && <button className="link note" onClick={() => save('assignee', me.id)}>{t('issue.assignMe')}</button>}
+            <span>{t('issue.reporter')}</span>
+            <div className="with-avatar"><Avatar user={issue.reporter} size="sm" /> {issue.reporter.name}</div>
+            <span>{t('field.type')}</span>
+            <Select label={t('field.type')} disabled={!canEdit} value={issue.type.id}
+              options={project.types.map((x) => ({ value: x.id, label: x.name, icon: <TypeIcon type={x} /> }))} onChange={(v) => save('type', v)} />
+            <span>{t('field.priority')}</span>
+            <Select label={t('field.priority')} disabled={!canEdit} value={issue.priority}
+              options={PRIORITIES.map((p, i) => ({ value: i, label: p, icon: <PriorityIcon priority={i} label={p} /> }))} onChange={(v) => save('priority', v)} />
+            <span>{t('field.sprint')}</span>
+            <Select label={t('field.sprint')} disabled={!canEdit} value={issue.sprint?.id ?? 0}
+              options={[{ value: 0, label: t('project.backlog') },
+                ...(issue.sprint && !sprintChoices.some((x) => x.id === issue.sprint!.id) ? [{ value: issue.sprint.id, label: issue.sprint.name }] : []),
+                ...sprintChoices.map((x) => ({ value: x.id, label: x.name, hint: x.state === 'active' ? t('sprint.active') : undefined }))]}
+              onChange={(v) => save('sprint', v || null)} />
+            <span>{t('field.points')}</span>
+            <input type="number" min={0} step={0.5} defaultValue={issue.points ?? ''} key={`p${issue.points}`} disabled={!canEdit} aria-label={t('field.points')} placeholder={t('common.empty')}
+              onBlur={(e) => { const v = e.target.value === '' ? null : Number(e.target.value); if (v !== issue.points) save('points', v) }} />
+            <span>{t('field.due')}</span>
+            <input type="date" value={issue.due ?? ''} disabled={!canEdit} aria-label={t('field.due')} onChange={(e) => save('due', e.target.value || null)} />
+            <span>{t('field.labels')}</span>
+            <input defaultValue={issue.labels.join(', ')} key={`l${issue.labels.join()}`} disabled={!canEdit} aria-label={t('field.labels')} placeholder={t('issue.labelsHint')}
+              onBlur={(e) => { const v = e.target.value.split(',').map((s) => s.trim()).filter(Boolean); if (v.join() !== issue.labels.join()) save('labels', v) }} />
+            <span>{t('field.parent')}</span>
+            <ParentField issue={issue} canEdit={canEdit} onSave={(v) => save('parent', v)} />
+          </div>
+        </section>
+        <div className="dates">
+          {t('issue.created')} {new Date(issue.createdAt).toLocaleString()}<br />
+          {t('issue.updated')} {new Date(issue.updatedAt).toLocaleString()}
+          {issue.resolvedAt && <><br />{t('issue.resolved')} {new Date(issue.resolvedAt).toLocaleString()}</>}
+        </div>
+    </>
+  )
+
   return (
-    <div className="issue">
+    <div className={`issue ${panel ? 'in-drawer' : ''}`}>
       <div className="main">
         <div className="crumbs">
-          <Link to={`/p/${project.key}`}>{project.name}</Link>
-          {issue.parent && <> / <Link to={`/browse/${issue.parent}`}>{issue.parent}</Link></>}
-          {' / '}<span className="key">{issue.key}</span>
+          <Link to="/">{t('home.projects')}</Link><i>/</i>
+          <Link to={`/p/${project.key}`}>{project.name}</Link><i>/</i>
+          {issue.parent && <><Link to={`/browse/${issue.parent}`}>{issue.parent}</Link><i>/</i></>}
+          <TypeIcon type={issue.type} size={14} /><span className="key">{issue.key}</span>
         </div>
-        <input className="title" defaultValue={issue.title} key={`t${issue.title}`} disabled={!canEdit}
-          onBlur={(e) => e.target.value.trim() && e.target.value !== issue.title && save('title', e.target.value)} />
+        <input className="title" defaultValue={issue.title} key={`t${issue.title}`} disabled={!canEdit} aria-label={t('col.title')}
+          onBlur={(e) => e.target.value.trim() && e.target.value !== issue.title && save('title', e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()} />
+        <div className="issue-actions">
+          {project.level >= 2 && <button onClick={() => file.current?.click()}><Icon name="paperclip" size={14} /> {t('issue.attach')}</button>}
+          {canEdit && issue.type.level < 2 && <button onClick={() => setAdding('child')}><Icon name="subtask" size={14} /> {t('issue.addChildButton')}</button>}
+          {canEdit && <button onClick={() => setAdding('link')}><Icon name="link" size={14} /> {t('issue.addLink')}</button>}
+          <input ref={file} type="file" hidden onChange={(e) => { upload(e.target.files?.[0]); e.target.value = '' }} />
+        </div>
+        {panel && <div className="side in-panel">{side}</div>}
+
         <h4>{t('field.description')}</h4>
         {!editingDesc ? (
           <div className="desc" onClick={(e) => canEdit && !(e.target as HTMLElement).closest('a') && setEditingDesc(true)}>
@@ -80,132 +171,99 @@ export function IssueView({ issueKey, me }: { issueKey: string; me: Me }) {
           <Editor content={issue.doc} placeholder={t('field.description')} onSubmit={(doc) => { save('doc', doc); setEditingDesc(false) }} onCancel={() => setEditingDesc(false)} />
         )}
 
-        {(related.children.length > 0 || issue.type.level < 2) && (
+        {(related.children.length > 0 || adding === 'child') && (
           <>
             <h4>{issue.type.level === 0 ? t('issue.epicChildren') : t('issue.subtasks')}</h4>
-            <IssueList issues={related.children} />
-            {canEdit && issue.type.level < 2 && <QuickChild project={project} parent={issue} onDone={load} />}
+            {related.children.length > 0 && (
+              <div className="progress">
+                <div className="bar"><span style={{ width: `${(done / related.children.length) * 100}%` }} /></div>
+                {t('issue.done', { done, total: related.children.length })}
+              </div>
+            )}
+            {related.children.length > 0 && <IssueList issues={related.children} />}
+            {canEdit && issue.type.level < 2 && adding === 'child' && <QuickChild project={project} parent={issue} onDone={load} onClose={() => setAdding(null)} />}
           </>
         )}
 
-        <h4>{t('field.links')}</h4>
-        <ul className="list">
-          {related.links.map((l) => (
-            <li key={`${l.kind}${l.key}${l.outward}`}>
-              <span className="muted">{t(LINK_TEXT[l.kind][l.outward ? 0 : 1])}</span> <Link to={`/browse/${l.key}`}><span className="key">{l.key}</span> {l.title}</Link>
-              <span className={`pill c${l.category}`}>{l.status}</span>
-              {canEdit && <button className="ghost" onClick={() => act(api('DELETE', `${base}/links`, { kind: l.kind === 'blocks' && !l.outward ? 'is_blocked_by' : l.kind, target: l.key }))}>×</button>}
-            </li>
-          ))}
-        </ul>
-        {canEdit && <AddLink base={base} onDone={load} />}
-
-        <h4>{t('field.attachments')}</h4>
-        <ul className="list">
-          {related.attachments.map((a) => <li key={a.id}><a href={`/api/attachments/${a.id}`} target="_blank" rel="noreferrer">{a.name}</a> <span className="muted">{Math.ceil(a.size / 1024)} KB</span></li>)}
-        </ul>
-        {project.level >= 2 && (
-          <input type="file" onChange={(e) => {
-            const f = e.target.files?.[0]
-            if (!f) return
-            const form = new FormData()
-            form.append('file', f)
-            act(api('POST', `${base}/attachments`, form))
-            e.target.value = ''
-          }} />
+        {(related.links.length > 0 || adding === 'link') && (
+          <>
+            <h4>{t('field.links')}</h4>
+            {related.links.length > 0 && (
+              <ul className="list boxed">
+                {related.links.map((l) => (
+                  <li key={`${l.kind}${l.key}${l.outward}`}>
+                    <span className="muted small" style={{ width: 110 }}>{t(LINK_TEXT[l.kind][l.outward ? 0 : 1])}</span>
+                    <span className="key">{l.key}</span>
+                    <Link to={`/browse/${l.key}`}>{l.title}</Link>
+                    <span className={`lozenge c${l.category}`}>{l.status}</span>
+                    {canEdit && <button className="ghost icon sm" aria-label={t('common.delete')} onClick={() => act(api('DELETE', `${base}/links`, { kind: l.kind === 'blocks' && !l.outward ? 'is_blocked_by' : l.kind, target: l.key }))}><Icon name="x" size={14} /></button>}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {canEdit && adding === 'link' && <AddLink base={base} self={issue.key} onDone={load} onClose={() => setAdding(null)} />}
+          </>
         )}
 
-        <nav className="tabs small">
+        {related.attachments.length > 0 && (
+          <>
+            <h4>{t('field.attachments')}</h4>
+            <div className="attachments">
+              {related.attachments.map((a) => (
+                <a key={a.id} className="attachment" href={`/api/attachments/${a.id}`} target="_blank" rel="noreferrer">
+                  <Icon name="paperclip" size={14} />{a.name} <span className="muted small">{Math.ceil(a.size / 1024)} KB</span>
+                </a>
+              ))}
+            </div>
+          </>
+        )}
+
+        <h4>{t('issue.activity')}</h4>
+        <nav className="tabs" style={{ marginTop: 0 }}>
           <button className={tab === 'comments' ? 'on' : ''} onClick={() => setTab('comments')}>{t('issue.comments', { n: comments.length })}</button>
           <button className={tab === 'history' ? 'on' : ''} onClick={() => setTab('history')}>{t('issue.history', { n: changes.length })}</button>
         </nav>
         {tab === 'comments' ? (
           <>
+            {project.level >= 2 && (
+              <div className="comment">
+                <Avatar user={me} size="lg" />
+                <Editor key={commentKey} placeholder={t('issue.comment')} submitLabel={t('issue.addComment')}
+                  onSubmit={(doc) => act(api('POST', `${base}/comments`, { doc }).then(() => setCommentKey((k) => k + 1)))} />
+              </div>
+            )}
             {comments.map((c) => (
               <div key={c.id} className="comment">
-                <b>{c.author.name}</b> <span className="muted">{new Date(c.createdAt).toLocaleString()}</span>
-                {(c.author.id === me.id || project.level >= 4) && <button className="ghost" onClick={() => act(api('DELETE', `${base}/comments/${c.id}`))}>{t('common.delete')}</button>}
-                <DocView doc={c.doc} />
+                <Avatar user={c.author} size="lg" />
+                <div>
+                  <div className="who">
+                    <b>{c.author.name}</b> <span className="muted small">{new Date(c.createdAt).toLocaleString()}</span>
+                    {(c.author.id === me.id || project.level >= 4) && <button className="ghost" onClick={() => act(api('DELETE', `${base}/comments/${c.id}`))}>{t('common.delete')}</button>}
+                  </div>
+                  <DocView doc={c.doc} />
+                </div>
               </div>
             ))}
-            {project.level >= 2 && (
-              <Editor key={commentKey} placeholder={t('issue.comment')} submitLabel={t('issue.addComment')}
-                onSubmit={(doc) => act(api('POST', `${base}/comments`, { doc }).then(() => setCommentKey((k) => k + 1)))} />
-            )}
           </>
         ) : (
           <ul className="list history">
             {changes.map((c) => (
               <li key={c.id}>
-                <span className="muted">{new Date(c.at).toLocaleString()}</span> <b>{c.actor?.name ?? t('common.system')}</b> {FIELD_NAMES[c.field] ? t(FIELD_NAMES[c.field]) : c.field}
+                <b>{c.actor?.name ?? t('common.system')}</b> {FIELD_NAMES[c.field] ? t(FIELD_NAMES[c.field]) : c.field}
                 {c.field !== 'created' && c.field !== 'deleted' && c.field !== 'restored' && <> : {c.field === 'doc' ? t('history.docChanged') : `${show(c.old)} → ${show(c.new)}`}</>}
+                <span className="muted small"> · {new Date(c.at).toLocaleString()}</span>
               </li>
             ))}
           </ul>
         )}
       </div>
 
-      <aside className="side">
-        <label>{t('field.status')}
-          <select value="" disabled={!canEdit || !moves.length} onChange={(e) => act(api('POST', `${base}/transitions`, { to: Number(e.target.value), lockVersion: issue.lockVersion }))}>
-            <option value="">{issue.status.name}</option>
-            {moves.map((m) => <option key={m.to.id} value={m.to.id}>{m.name === m.to.name ? `→ ${m.to.name}` : `${m.name} → ${m.to.name}`}</option>)}
-          </select>
-        </label>
-        <label>{t('field.assignee')}
-          <select value={issue.assignee?.id ?? ''} disabled={!canEdit} onChange={(e) => save('assignee', e.target.value ? Number(e.target.value) : null)}>
-            <option value="">{t('common.empty')}</option>
-            {!users.some((u) => u.id === issue.assignee?.id) && issue.assignee && <option value={issue.assignee.id}>{issue.assignee.name}</option>}
-            {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </select>
-          {canEdit && issue.assignee?.id !== me.id && <button className="link" onClick={() => save('assignee', me.id)}>{t('issue.assignMe')}</button>}
-        </label>
-        <label>{t('field.type')}
-          <select value={issue.type.id} disabled={!canEdit} onChange={(e) => save('type', Number(e.target.value))}>
-            {project.types.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
-        </label>
-        <label>{t('field.priority')}
-          <select value={issue.priority} disabled={!canEdit} onChange={(e) => save('priority', Number(e.target.value))}>
-            {PRIORITIES.map((p, i) => <option key={i} value={i}>{p}</option>)}
-          </select>
-        </label>
-        <label>{t('field.sprint')}
-          <select value={issue.sprint?.id ?? ''} disabled={!canEdit} onChange={(e) => save('sprint', e.target.value ? Number(e.target.value) : null)}>
-            <option value="">{t('project.backlog')}</option>
-            {issue.sprint && !sprintChoices.some((s) => s.id === issue.sprint!.id) && <option value={issue.sprint.id}>{issue.sprint.name}</option>}
-            {sprintChoices.map((s) => <option key={s.id} value={s.id}>{s.name}{s.state === 'active' ? ` (${t('sprint.active')})` : ''}</option>)}
-          </select>
-        </label>
-        <label>{t('field.points')}
-          <input type="number" min={0} step={0.5} defaultValue={issue.points ?? ''} key={`p${issue.points}`} disabled={!canEdit}
-            onBlur={(e) => { const v = e.target.value === '' ? null : Number(e.target.value); if (v !== issue.points) save('points', v) }} />
-        </label>
-        <label>{t('field.due')}
-          <input type="date" value={issue.due ?? ''} disabled={!canEdit} onChange={(e) => save('due', e.target.value || null)} />
-        </label>
-        <label>{t('field.labels')}
-          <input defaultValue={issue.labels.join(', ')} key={`l${issue.labels.join()}`} disabled={!canEdit} placeholder={t('issue.labelsHint')}
-            onBlur={(e) => { const v = e.target.value.split(',').map((s) => s.trim()).filter(Boolean); if (v.join() !== issue.labels.join()) save('labels', v) }} />
-        </label>
-        <label>{t('field.parent')}
-          <input defaultValue={issue.parent ?? ''} key={`pa${issue.parent}`} disabled={!canEdit} placeholder={issue.type.level === 0 ? t('issue.epicNoParent') : `${project.key}-1`}
-            onBlur={(e) => { const v = e.target.value.trim().toUpperCase() || null; if (v !== issue.parent) save('parent', v) }} />
-        </label>
-        <p className="muted small">
-          {t('issue.reporter')} {issue.reporter.name}<br />
-          {t('issue.created')} {new Date(issue.createdAt).toLocaleString()}<br />
-          {t('issue.updated')} {new Date(issue.updatedAt).toLocaleString()}
-          {issue.resolvedAt && <><br />{t('issue.resolved')} {new Date(issue.resolvedAt).toLocaleString()}</>}
-        </p>
-        <button onClick={() => act(api(related.watching ? 'DELETE' : 'POST', `${base}/watch`))}>{related.watching ? t('issue.unwatch') : t('issue.watch')}</button>
-        {canEdit && <button className="danger" onClick={() => { if (confirm(t('issue.deleteConfirm', { key: issue.key }))) api('DELETE', base).then(() => nav(`/p/${project.key}`), (e) => toast(message(e))) }}>{t('common.delete')}</button>}
-      </aside>
+      {!panel && <aside className="side">{side}</aside>}
     </div>
   )
 }
 
-function QuickChild({ project, parent, onDone }: { project: Project; parent: Issue; onDone: () => void }) {
+function QuickChild({ project, parent, onDone, onClose }: { project: Project; parent: Issue; onDone: () => void; onClose: () => void }) {
   const [title, setTitle] = useState('')
   // Under an epic the default child is a story (a type name from the data); under a story, the subtask type.
   const type = project.types.find((x) => x.level === parent.type.level + 1 && (parent.type.level === 1 || x.name === '스토리')) ?? project.types.find((x) => x.level === parent.type.level + 1)
@@ -215,24 +273,78 @@ function QuickChild({ project, parent, onDone }: { project: Project; parent: Iss
       if (!title.trim() || !type) return
       api('POST', `/api/projects/${project.key}/issues`, { title, type: type.id, parent: parent.key }).then(() => { setTitle(''); onDone() }, (x) => toast(message(x)))
     }}>
-      <input placeholder={t('issue.addChild', { type: type?.name ?? t('issue.child') })} aria-label={t('issue.addChild', { type: type?.name ?? t('issue.child') })} value={title} onChange={(e) => setTitle(e.target.value)} />
+      <input autoFocus placeholder={t('issue.addChild', { type: type?.name ?? t('issue.child') })} aria-label={t('issue.addChild', { type: type?.name ?? t('issue.child') })} value={title} onChange={(e) => setTitle(e.target.value)}
+        onKeyDown={(e) => e.key === 'Escape' && onClose()} />
+      <button className="primary">{t('common.add')}</button>
+      <button type="button" onClick={onClose}>{t('common.cancel')}</button>
     </form>
   )
 }
 
-function AddLink({ base, onDone }: { base: string; onDone: () => void }) {
-  const [kind, setKind] = useState('blocks')
-  const [target, setTarget] = useState('')
+/** Find an issue by key or words in its title (quick search), with the keyboard or the mouse. */
+export function IssuePicker({ onPick, exclude = [], placeholder, onEscape, accept = () => true }: { onPick: (i: Issue) => void; exclude?: string[]; placeholder: string; onEscape?: () => void; accept?: (i: Issue) => boolean }) {
+  const [q, setQ] = useState('')
+  const [hits, setHits] = useState<Issue[]>([])
+  const [idx, setIdx] = useState(0)
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    if (!q.trim()) return setHits([])
+    const t = setTimeout(() => api('GET', `/api/quick?q=${encodeURIComponent(q.trim())}`).then((r) => { setHits(r.issues.filter((i: Issue) => !exclude.includes(i.key) && accept(i)).slice(0, 8)); setIdx(0) }, () => setHits([])), 150)
+    return () => clearTimeout(t)
+  }, [q])
+  const pick = (i: Issue) => { onPick(i); setQ(''); setHits([]) }
   return (
-    <form className="inline" onSubmit={(e) => {
-      e.preventDefault()
-      api('POST', `${base}/links`, { kind, target: target.trim().toUpperCase() }).then(() => { setTarget(''); onDone() }, (x) => toast(message(x)))
-    }}>
-      <select value={kind} onChange={(e) => setKind(e.target.value)}>
-        <option value="blocks">{t('link.blocks')}</option><option value="is_blocked_by">{t('link.blockedBy')}</option><option value="relates">{t('link.relates')}</option><option value="duplicates">{t('link.duplicates')}</option>
-      </select>
-      <input placeholder={t('col.key')} aria-label={t('col.key')} value={target} onChange={(e) => setTarget(e.target.value)} required />
-      <button>{t('link.add')}</button>
-    </form>
+    <div className="picker">
+      <input autoFocus value={q} placeholder={placeholder} aria-label={placeholder} role="combobox" aria-expanded={open && hits.length > 0} aria-autocomplete="list"
+        onChange={(e) => { setQ(e.target.value); setOpen(true) }} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowDown') { e.preventDefault(); setIdx((idx + 1) % Math.max(hits.length, 1)) }
+          else if (e.key === 'ArrowUp') { e.preventDefault(); setIdx((idx + hits.length - 1) % Math.max(hits.length, 1)) }
+          else if (e.key === 'Enter') { e.preventDefault(); if (hits[idx]) pick(hits[idx]) }
+          else if (e.key === 'Escape') onEscape?.()
+        }} />
+      {open && q.trim() && (
+        <ul className="picker-menu" role="listbox">
+          {hits.map((i, n) => (
+            <li key={i.id} role="option" aria-selected={n === idx} className={n === idx ? 'on' : ''} onMouseDown={(e) => { e.preventDefault(); pick(i) }} onMouseEnter={() => setIdx(n)}>
+              <TypeIcon type={i.type} /><span className="key">{i.key}</span><span className="grow ellipsis">{i.title}</span>
+              <span className={`lozenge c${i.status.category}`}>{i.status.name}</span>
+            </li>
+          ))}
+          {!hits.length && <li className="muted small">{t('picker.none')}</li>}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/** The parent: a link to it, changed with the issue picker (only issues one level up in the same project fit). */
+function ParentField({ issue, canEdit, onSave }: { issue: Issue; canEdit: boolean; onSave: (key: string | null) => void }) {
+  const [editing, setEditing] = useState(false)
+  if (issue.type.level === 0) return <span className="muted small field-text">{t('issue.epicNoParent')}</span>
+  if (editing) return (
+    <IssuePicker placeholder={t('picker.parent')} exclude={[issue.key]} onEscape={() => setEditing(false)}
+      accept={(i) => i.type.level === issue.type.level - 1 && i.key.split('-')[0] === issue.key.split('-')[0]}
+      onPick={(i) => { onSave(i.key); setEditing(false) }} />
+  )
+  return (
+    <div className="field-text">
+      {issue.parent ? <Link to={`/browse/${issue.parent}`}>{issue.parent}</Link> : <span className="muted">{t('common.empty')}</span>}
+      {canEdit && <button className="link" onClick={() => setEditing(true)}>{t('picker.change')}</button>}
+      {canEdit && issue.parent && issue.type.level === 1 && <button className="link danger" onClick={() => onSave(null)}>{t('picker.clear')}</button>}
+    </div>
+  )
+}
+
+function AddLink({ base, self, onDone, onClose }: { base: string; self: string; onDone: () => void; onClose: () => void }) {
+  const [kind, setKind] = useState('blocks')
+  return (
+    <div className="add-link">
+      <Select label={t('field.links')} value={kind} onChange={setKind}
+        options={[{ value: 'blocks', label: t('link.blocks') }, { value: 'is_blocked_by', label: t('link.blockedBy') }, { value: 'relates', label: t('link.relates') }, { value: 'duplicates', label: t('link.duplicates') }]} />
+      <IssuePicker exclude={[self]} placeholder={t('picker.placeholder')} onEscape={onClose}
+        onPick={(i) => api('POST', `${base}/links`, { kind, target: i.key }).then(() => { toast(t('link.added', { key: i.key })); onDone(); onClose() }, (x) => toast(message(x)))} />
+      <button type="button" onClick={onClose}>{t('common.cancel')}</button>
+    </div>
   )
 }

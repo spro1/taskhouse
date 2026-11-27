@@ -1,6 +1,7 @@
 // Background work from the jobs table: webhook delivery with retries, and retention cleanup.
 // Claiming a job pushes its run_at forward (a lease), so a crashed worker's job is simply picked up again later.
 import { createHmac } from 'node:crypto'
+import { inc } from './metrics.ts'
 import dns from 'node:dns'
 import http from 'node:http'
 import https from 'node:https'
@@ -76,7 +77,9 @@ export async function runJobs(db: Db) {
     try {
       if (j.kind === 'webhook') await deliver(db, j.payload)
       await db.query('UPDATE jobs SET done_at = now(), last_error = NULL WHERE id = $1', [j.id])
+      inc('taskhouse_webhook_deliveries_total', { result: 'ok' })
     } catch (e) {
+      inc('taskhouse_webhook_deliveries_total', { result: 'failed' })
       // 1, 4, 16, 64 minutes, then give up (the error stays visible on the webhook list).
       await db.query(`UPDATE jobs SET last_error = $2, run_at = now() + make_interval(mins => $3), done_at = CASE WHEN attempts >= $4 THEN now() END WHERE id = $1`,
         [j.id, String((e as Error).message).slice(0, 500), 4 ** (j.attempts - 1), MAX_ATTEMPTS])
@@ -88,7 +91,8 @@ export async function runJobs(db: Db) {
 /** Attachment files nothing refers to any more (deleted 30+ days ago, or an upload whose transaction failed). */
 export async function pruneFiles(db: Db, filesDir: string, now = Date.now()) {
   await db.query(`DELETE FROM attachments WHERE deleted_at < now() - interval '30 days'`)
-  const used = new Set((await db.query('SELECT DISTINCT sha256 FROM attachments')).rows.map((r) => r.sha256))
+  // Profile photos live in the same store.
+  const used = new Set((await db.query(`SELECT sha256 AS h FROM attachments UNION SELECT split_part(avatar, ':', 1) FROM users WHERE avatar IS NOT NULL`)).rows.map((r) => r.h))
   let removed = 0
   for (const name of readdirSync(filesDir)) {
     const path = join(filesDir, name)

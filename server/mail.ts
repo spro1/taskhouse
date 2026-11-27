@@ -2,6 +2,7 @@
 // so a burst of edits on one issue becomes one mail. Only unread notifications, and only for projects the person
 // can still see when the mail goes out.
 import nodemailer, { type Transporter } from 'nodemailer'
+import { inc } from './metrics.ts'
 import type { Db } from './db.ts'
 import { canSeeProject } from './access.ts'
 
@@ -70,7 +71,9 @@ export async function sendDigests(db: Db, transport: Transporter, now = 'now()')
         text: `${L.hello(user.name)}\n\n${lines.join('\n\n')}\n\n${L.off} ${base}/me\n`,
       })
       sent++
+      inc('taskhouse_mail_sent_total', { result: 'ok' })
     } catch (e) {
+      inc('taskhouse_mail_sent_total', { result: 'failed' })
       // Give them back, so the next round tries again.
       await db.query('UPDATE notifications SET mailed_at = NULL WHERE id = ANY($1)', [items.map((r) => r.id)])
       console.error('mail:', (e as Error).message)

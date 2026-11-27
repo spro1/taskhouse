@@ -86,6 +86,7 @@ export function registerLive(app: Hono<Env>, db: Db, url: string) {
 
   return {
     injectWebSocket,
+    connections: () => [...subs.values()].reduce((n, set) => n + set.size, 0),
     ready: async () => { while (!listener) await new Promise((r) => setTimeout(r, 20)) },
     close: async () => {
       closed = true
