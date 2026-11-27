@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      # Debian image on purpose: it has the en_US.UTF-8 locale the app needs for Korean search (see README).
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: taskhouse
+          POSTGRES_PASSWORD: taskhouse
+          POSTGRES_DB: taskhouse_test
+          POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=en_US.UTF-8
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U taskhouse -d taskhouse_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://taskhouse:taskhouse@localhost:5432/taskhouse_test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Shell scripts parse
+        run: for f in scripts/*.sh docker/*.sh; do sh -n "$f"; done
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: npm audit --audit-level=low
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: taskhouse:ci
+          build-args: VERSION=ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: docker/build-push-action@v7
+        with:
+          context: docker/postgres
+          load: true
+          tags: taskhouse-postgres:ci
+      - name: Scan images (fail on any fixable vulnerability)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: taskhouse:ci
+          ignore-unfixed: true
+          exit-code: "1"
+      - uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: taskhouse-postgres:ci
+          ignore-unfixed: true
+          exit-code: "1"
