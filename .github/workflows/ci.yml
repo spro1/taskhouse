@@ -12,7 +12,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     services:
-      # Debian image on purpose: it has the en_US.UTF-8 locale the app needs for Korean search (see README).
+      # Debian image on purpose: it has the en_US.UTF-8 locale the app needs for Korean search (see docs/install.md).
       postgres:
         image: postgres:17
         env:

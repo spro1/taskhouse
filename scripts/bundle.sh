@@ -9,6 +9,8 @@ version=$(sed -n 's/.*"version": "\(.*\)".*/\1/p' package.json | head -n 1)
 out="taskhouse-$version"
 mkdir -p "dist-bundle/$out/scripts" "dist-bundle/$out/docker/postgres"
 cp docker-compose.yml docker-compose.shared.yml .env.example README.md README.ko.md "dist-bundle/$out/"
+cp -R docs "dist-bundle/$out/"
+cp -R docs "dist-bundle/$out/"
 cp scripts/compose.sh scripts/install.sh scripts/backup.sh scripts/restore.sh scripts/upgrade.sh "dist-bundle/$out/scripts/"
 cp docker/backup.sh "dist-bundle/$out/docker/"
 cp docker/postgres/Dockerfile "dist-bundle/$out/docker/postgres/"

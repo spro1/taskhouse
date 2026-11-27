@@ -20,7 +20,7 @@ npm run typecheck
 ```
 
 A PostgreSQL you run yourself must use a UTF-8 locale (`--locale=en_US.UTF-8`), or Korean search can't use its
-index (see the README).
+index (see [docs/install.md](docs/install.md#images-and-vulnerabilities)).
 
 ## How changes get in
 
@@ -54,6 +54,6 @@ and make sure nothing in it comes from code you aren't allowed to use.
 - Never lose user data: migrations only add. They live in `server/migrations/NNN_name.sql`; never edit one that
   was released.
 - Every UI string goes in `web/i18n.ts`, in both `ko` and `en` (the type check fails if a key is missing, and a test checks the `{placeholders}` match).
-- Settings go in `.env.example` with a comment, and behaviour changes in both `README.md` and `README.ko.md`.
+- Settings go in `.env.example` with a comment, and behaviour changes in the README or `docs/`, always in both the English and the Korean file.
 - Keep it small: prefer what the platform, PostgreSQL or an existing dependency already does over new code or
   packages. New dependencies must be the latest stable version, and `npm audit` must report nothing.

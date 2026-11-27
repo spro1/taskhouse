@@ -1,157 +1,170 @@
+<div align="center">
+
+<img src="docs/images/logo.svg" width="72" height="72" alt="Taskhouse 로고">
+
 # Taskhouse
 
-[English](README.md) | 한국어
+**소규모 조직과 팀이 자기 서버에 설치해 쓰는 온프레미스 이슈 트래커.**<br>
+백로그, 스프린트, 보드를 사내망 안에서 한곳에.<br>
+Jira를 대신할 오픈소스 셀프호스팅 도구이자 [Pagehouse](https://github.com/spro1/pagehouse)(위키)의 짝 제품입니다.
 
-소규모 조직(5~100명)이 자기 서버에 설치해 쓰는 경량 이슈 트래커입니다. 앱 하나와 PostgreSQL 하나로 동작합니다.
-Apache-2.0 라이선스의 오픈소스입니다. 보안 문제는 [SECURITY.md](SECURITY.md)의 방법으로 비공개 제보해 주세요.
-기여 방법은 [CONTRIBUTING.md](CONTRIBUTING.md)를 보세요.
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![CI](https://github.com/spro1/taskhouse/actions/workflows/ci.yml/badge.svg)](https://github.com/spro1/taskhouse/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/spro1/taskhouse?include_prereleases&sort=semver)](https://github.com/spro1/taskhouse/releases)
+![Docker | Podman](https://img.shields.io/badge/runs%20on-Docker%20%7C%20Podman-2f6feb)
+![Air-gapped](https://img.shields.io/badge/air--gapped-supported-2f6feb)
 
-## 지금 들어 있는 것 (0·1단계 + TQL)
+[맞는지 보기](#우리-조직에-맞을까) · [설치](#설치) · [첫날 할 일](#첫날-할-일) · [운영](#운영) · [FAQ](#faq) · [English](README.md)
 
-- 첫 실행 설정 토큰(서버 로그에 출력), 초대 링크 계정, 비밀번호 로그인, OIDC SSO(PKCE, nonce, 그룹 동기화, 관리자 그룹; 관리 화면 또는 환경변수로 설정)
-- Pagehouse(위키)와 계정 공유: 같은 데이터베이스를 쓰면 사용자·로그인·그룹·SSO 설정을 함께 쓰고 상단 메뉴로 오갑니다. 역할과 권한은 제품마다 따로(아래 "Pagehouse와 함께 쓰기")
-- 로그인 시도 제한: 15분 동안 같은 주소·계정 10회, 같은 주소 50회, 같은 계정 30회(넘으면 429와 `Retry-After`)
-- 비밀번호 찾기(메일 설정 시 1시간짜리 링크), 관리자가 발급하는 재설정 링크와 임시 비밀번호(다음 로그인 때 변경 강제)
-- 한국어·영어 화면과 메일(계정마다 선택, 기본 한국어)
-- DB에 저장하는 비밀값(웹훅 서명 키, SSO 클라이언트 비밀)은 `SECRET_KEY`로 암호화
-- 개인 API 토큰(최대 365일, 기본 90일). 계정 비활성화 시 폐기, SSO 계정은 30일간 로그인이 없으면 정지
-- 프로젝트 역할 4종(열람자·보고자·멤버·관리자)과 공개 범위 3종. 권한 밖 이슈는 모든 경로에서 404
-- 이슈(에픽 > 표준 > 하위 작업 계층 검사), 필드 단위 병합(`_base`), 변경 이력, 댓글, 링크, 첨부(sha256 중복 제거), 지켜보기
-- 설명·댓글은 Tiptap 서식 문서와 @멘션(멘션된 사람에게 알림). 저장된 문서는 HTML 문자열 없이 React 요소로만 그려서 스크립트가 끼어들 수 없음
-- 워크플로: 기본은 자유 이동. 설정 화면에서 상태와 전이 규칙(누가·조건·이동 후 처리)을 편집. 상태마다 보드에 표시할지 선택
-- 보드(드래그로 전이와 순서 변경), 백로그, 스프린트(시작·완료 시 미완료 이슈 이동)
-- 화면: Pagehouse와 같은 사이드바·디자인 토큰·밝게/어둡게 테마(계정에 저장)·프로필 사진. 아이콘과 사진이 들어간 선택 목록, 상위 이슈와 연결은 검색으로 선택. 어디서나 `C` 키로 이슈 만들기 창, 보드 빠른 필터(검색·담당자·내 이슈만), 유형·우선순위 아이콘과 상태 표시
-- 실시간 갱신: 보드·백로그·이슈 화면이 다른 사람의 변경을 바로 반영(WebSocket + LISTEN/NOTIFY, 소켓으로는 ID만 보냄)
-- 검색: TQL(JQL 부분집합, `CHANGED`, `linked`, `membersOf()` 등)과 필터 칩이 같은 엔진을 씀. 권한 조건 항상 포함, 3초 제한. ⌘K로 키 이동과 전문 검색. 저장된 필터
-- 한국어 검색: 조사 처리, 2글자 단어도 인덱스 사용(한글 2음절 조각 GIN 인덱스)
-- 알림: 앱 내 알림, 메일 묶음(SMTP 설정 시, 5분 조용하면 발송), 웹훅(HMAC 서명, 재시도 5회)과 메신저(Slack·Mattermost·Teams). 모두 볼 권한이 있는 사람에게만
-- 관리 화면(초대, 비활성화, 관리자 지정, 비밀번호 재설정 링크, 임시 비밀번호, SSO 설정, 감사 로그), 내 설정(언어, 비밀번호 변경, 알림 메일, API 토큰)
-- 내보내기: 프로젝트 전체 JSON(설명·댓글·링크·이력 포함), 이슈 목록 CSV
-- 보안: 요청 크기 제한, 다른 사이트에서 온 변경 요청 거부, CSP·프레임 차단 헤더, 웹훅은 사이트 관리자만 등록하고 루프백·링크로컬로는 보내지 않음, 백업 파일은 소유자만 읽기
-- 감사 로그, 자동 백업(첨부는 하드링크로 증분), 복원·업그레이드·오프라인 번들 스크립트, 첨부 저장 한도와 쓰지 않는 파일 정리
-- 모니터링(관리 → 모니터링): 최근 15분 요청·서버 오류·느린 요청, DB 응답, 실시간 연결, 밀린 웹훅·메일, 저장 공간, 백업 지연 경고, 사용 현황. `METRICS_TOKEN`을 넣으면 `/metrics`에서 Prometheus로 수집
-- AI 에이전트(MCP): `/api/mcp`에서 개인 API 토큰으로 이슈 검색(TQL)·조회·생성·수정·상태 이동·댓글. 토큰 주인의 권한이 그대로 적용됨
-- 보드·백로그에서 이슈를 누르면 오른쪽 패널에 열림(⌘/Ctrl-클릭은 새 탭), 이슈 연결은 키나 제목으로 검색
+<img src="docs/images/screenshot-board.png" alt="할 일, 진행 중, 리뷰 중, 완료 열이 있는 Taskhouse 스프린트 보드" width="100%">
 
-아직 없는 것(2·3단계): Git·CI 연동, 버전·릴리스, 차트, 사용자 정의 필드, 자동화 규칙, 타임라인, 이슈별 열람 제한.
+</div>
 
-### 성능 (이슈 5만 건, `npx tsx scripts/perf.ts`)
+## 누구를 위한 것인가
 
-| 쿼리 | 응답 |
+- 호스팅 트래커 비용이 부담되거나, 갱신 때마다 사용자 수를 세기 지친 **5~100명 규모의 회사와 팀**
+- 보안 정책, 고객 요구, 폐쇄망 때문에 **업무 데이터를 남의 서버에 둘 수 없는** 조직
+- **전담 운영 인력이 없어** 서버 한 대에 올려 두고 신경 쓰지 않고 싶은 팀
+
+## 우리 조직에 맞을까
+
+| | Taskhouse |
 |---|---|
-| 백로그, 보드, 내 이슈, 라벨, 오래된 진행 건 | 4~19ms |
-| 본문 검색(한글 2글자·단어) | 15~31ms |
-| 5만 자짜리 설명 저장 | 89ms |
+| **데이터 위치** | 전부 내 서버(PostgreSQL과 파일 볼륨). 외부 폰트·CDN·사용 통계 없음. 밖으로 나가는 요청은 직접 켠 것(SSO, 메일, 웹훅)뿐 |
+| **인터넷 없이** | 이미지가 든 오프라인 번들로 설치와 업그레이드 |
+| **비용** | Apache-2.0 오픈소스, 사용자 수 제한 없음 |
+| **필요한 것** | Docker 또는 Podman이 있는 Linux 서버 한 대 |
+| **구성 요소** | 앱, PostgreSQL, 백업 작업. 컨테이너 셋, 외부 서비스 없음 |
+| **데이터 안전** | 매일 자동 백업(첨부는 하드링크라 새 파일만 늘어남), 업그레이드·복원 전 자동 백업 |
+| **떠날 때** | 프로젝트 전체를 JSON으로(설명·댓글·링크·이력 포함), 이슈 목록을 CSV로 내보내기 |
+| **로그인** | 초대 링크로 만드는 로컬 계정, 또는 OpenID Connect SSO(Keycloak으로 확인, IdP 그룹과 관리자 반영) |
+| **위키와 함께** | 같은 데이터베이스를 쓰면 [Pagehouse](https://github.com/spro1/pagehouse)와 사용자·로그인·그룹·SSO를 공유 |
 
-## 설치와 운영 (Podman 또는 Docker)
+## 기능
+
+| | |
+|---|---|
+| 📋 **이슈** | 에픽·스토리·작업·버그·하위 작업(계층 검사), 서식 있는 설명과 댓글·`@`멘션, 연결(차단·관련), 첨부, 지켜보기, 전체 변경 이력. 두 사람이 다른 필드를 고치면 서로 덮어쓰지 않음 |
+| 🏃 **스크럼** | 끌어서 순서를 바꾸는 백로그, 스프린트(완료하면 남은 이슈를 옮김), 카드를 끌면 상태가 바뀌는 보드. 검색·담당자·내 이슈만 빠른 필터 |
+| 🔀 **워크플로** | 기본은 자유 이동. 상태와 전이마다 누가 쓸 수 있는지, 조건(열린 차단 이슈 없음, 하위 작업 완료, 필수 필드), 이동 후 처리. 보드에 보일 상태 선택 |
+| 👆 **빠른 사용** | 이슈를 누르면 오른쪽 패널에 열림, 어디서나 `C`로 이슈 만들기, ⌘K로 키 이동과 검색, 상위 이슈와 연결은 키나 제목으로 검색해 선택. 다른 사람의 변경이 바로 보임 |
+| 🔎 **검색** | TQL(JQL 부분집합, `CHANGED`·`linked`·`membersOf()` 등)과 필터 칩이 같은 엔진, 저장된 필터. 한국어 조사 처리, 2글자 단어도 인덱스 사용. 볼 수 없는 이슈는 나오지 않음 |
+| 🔒 **권한** | 사람이나 그룹에 주는 프로젝트 역할 4종(열람자·보고자·멤버·관리자), 공개 범위 3종. 권한 밖 이슈는 모든 경로에서 404 |
+| 🔔 **알림** | 앱 내 알림, 메일 묶음(SMTP), 서명·재시도하는 웹훅, Slack·Mattermost·Teams. 볼 권한이 있는 사람에게만 |
+| 🤖 **AI 에이전트** | 내장 MCP 서버: 개인 API 토큰으로 이슈 검색·조회·생성·수정·상태 이동·댓글. 권한은 토큰 주인과 같음 |
+| 📊 **관리** | 초대, 비활성화, 관리자 지정, 재설정 링크와 임시 비밀번호, 화면에서 SSO 설정, 모니터링(요청·오류·DB·백업·저장 공간)과 Prometheus 지표, 감사 로그 |
+| 🌐 **화면** | 한국어·영어, 밝게·어둡게 테마, 프로필 사진(계정마다 저장). Pagehouse와 같은 모양과 사이드바 |
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/screenshot-panel.png" alt="이슈를 오른쪽 패널에 연 백로그"></td>
+    <td width="50%"><img src="docs/images/screenshot-dark.png" alt="어둡게 테마의 보드"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>백로그와 이슈 패널</sub></td>
+    <td align="center"><sub>어둡게 테마</sub></td>
+  </tr>
+</table>
+
+## 설치
+
+Linux(amd64 또는 arm64)에 Docker 24+ 또는 Podman 4+가 필요합니다.
+
+**릴리스 번들로**(인터넷 없이도 됨). [릴리스](https://github.com/spro1/taskhouse/releases)에서
+`taskhouse-<버전>-amd64.tar.gz`(또는 `-arm64`)와 `SHA256SUMS`를 받아 서버로 옮긴 뒤:
 
 ```sh
-scripts/install.sh               # .env 생성(DB 비밀번호 무작위) → 이미지 빌드 → 기동 → 설정 토큰 출력
-scripts/backup.sh                # 수동 백업 → ./backups/manual-<시각>/
-scripts/restore.sh <폴더 이름>    # 현재 상태를 prerestore-…로 먼저 백업한 뒤 복원
-scripts/upgrade.sh               # preupgrade-… 백업 → 새 이미지 → 재기동(마이그레이션 자동 적용)
+sha256sum -c SHA256SUMS --ignore-missing
+tar xzf taskhouse-<버전>-amd64.tar.gz && cd taskhouse-<버전>
+scripts/install.sh images.tar
 ```
 
-폐쇄망: [릴리스](https://github.com/spro1/taskhouse/releases)의 `taskhouse-<버전>-<amd64|arm64>.tar.gz`를 받거나, 인터넷이 되는 곳에서
-`scripts/bundle.sh`로 직접 만든 `taskhouse-<버전>.tar.gz`(이미지 포함, 약 180MB)를 옮겨
-`tar xzf … && cd taskhouse-<버전> && scripts/install.sh images.tar`. 업그레이드는 `scripts/upgrade.sh images.tar`.
-
-자동 백업은 24시간마다(`BACKUP_INTERVAL_HOURS`) 14개(`BACKUP_KEEP`)를 남깁니다. 백업 하나는 `db.dump` + `files/`이고,
-첨부는 내용이 바뀌지 않으므로 이전 백업과 하드링크로 공유합니다. `./backups`는 서버 밖으로도 복사해 두세요.
-
-### 기존 설치를 업그레이드할 때
-
-- `.env`에 `SECRET_KEY`(긴 무작위 문자열)를 추가하고 재시작하세요. 이미 저장된 웹훅 서명 키는 시작할 때 암호화되고, 받는 쪽은 바꿀 것이 없습니다.
-  `SECRET_KEY`가 없어도 지금처럼 동작합니다(평문 저장). 한 번 설정한 뒤 잃어버리면 웹훅 서명 키와 SSO 클라이언트 비밀을 다시 만들어야 합니다.
-- 로그인 세션의 기본 수명이 24시간으로 바뀌었습니다. 다만 기존 설치는 `.env`에 `SESSION_HOURS=12`가 적혀 있어 12시간으로 남습니다. 새 기본값을 쓰려면 그 줄을 `24`로 고치거나 지우고 재시작하세요(새 로그인부터 적용).
-- SSO로 새 계정을 만들 때도 IdP가 확인한 이메일이 필요합니다(Pagehouse와 같은 기준). `email_verified`를 보내지 않는 IdP를 쓰면 업그레이드 뒤 새 사용자가 SSO로 들어오지 못합니다(`no_email`).
-  그런 IdP라면 `.env`에 `OIDC_TRUST_EMAIL=1`을 넣거나 관리 → SSO에서 "확인 표시를 하지 않은 이메일도 믿기"를 켜세요. 이미 계정이 있는 사람은 영향이 없습니다.
-- `TRUST_PROXY`는 앞단 프록시 수입니다. 기존 `1`은 그대로 "프록시 1단"입니다. 이제 `X-Forwarded-For`의 오른쪽에서부터 세므로 클라이언트가 이 헤더를 꾸며도 로그인 제한을 피할 수 없습니다.
-- 계정 테이블(`users`, `sessions`, `groups`, `group_members`)이 처음 시작할 때 데이터와 함께 `accounts` 스키마로 옮겨지고, SSO 설정은 `accounts.settings`로 옮겨집니다. 사용할 때 달라지는 것은 없습니다. DB 계정에 데이터베이스의 `CREATE` 권한이 있어야 합니다(기본 설치와 데이터베이스 소유자에게는 이미 있음). 직접 실행하는 SQL에는 스키마를 붙여야 하고(`accounts.users`), 이전 버전은 새 구조를 읽지 못하므로 되돌리려면 `preupgrade-…` 백업을 복원하세요.
-- SSO에서 온 그룹도 이제 관리 화면에서 구성원을 고칠 수 있습니다. SSO 로그인은 자기가 넣은 구성원만 넣고 빼며, 직접 넣은 구성원은 건드리지 않습니다(Pagehouse와 같은 규칙).
-
-### Pagehouse와 함께 쓰기
-
-Taskhouse와 [Pagehouse](https://github.com/spro1/pagehouse)(위키)는 별도 제품이지만, 한 제품군의 두 제품처럼 계정을 함께 쓸 수 있습니다. 두 제품이 **같은 PostgreSQL 데이터베이스**(같은 `DATABASE_URL`)를 쓰면 계정을 공유합니다.
-각 제품의 테이블은 자기 스키마(`taskhouse`, `pagehouse`)에 있고, 사용자·비밀번호·로그인·그룹·SSO 설정은 `accounts` 스키마에 한 벌만 있습니다.
-
-| 함께 쓰는 것 | 제품마다 따로인 것 |
-|---|---|
-| 계정 (이름, 이메일, 비밀번호, 비활성화 여부) | 누가 관리자인지, 프로젝트 역할 등 모든 권한 |
-| 로그인: 한쪽에서 로그인·로그아웃하면 다른 쪽도 같습니다 | API 토큰 |
-| 그룹과 구성원 | 이슈, 페이지, 첨부, 웹훅, 감사 로그, 그 밖의 모든 설정 |
-| SSO 설정 (어느 제품의 관리 → SSO에서든) | |
-
-- **함께 설치하기 (서버 한 대)**: 둘 중 하나를 평소처럼 설치한 뒤, 다른 제품을 설치할 때 `--share-with`에 먼저 설치한 제품의 폴더를 지정합니다. 어느 쪽이 먼저여도 되고, 새 서버에 둘 다 설치할 때도 같습니다.
-  ```sh
-  # Pagehouse가 /opt/pagehouse에 설치되어 있을 때 Taskhouse 추가 (이 폴더에서 실행)
-  scripts/install.sh --share-with /opt/pagehouse            # 포트 3000, Pagehouse가 3000이면 3001
-  PORT=8081 scripts/install.sh --share-with /opt/pagehouse  # 포트를 직접 지정
-
-  # Taskhouse가 /opt/taskhouse에 설치되어 있을 때 Pagehouse 추가
-  curl -fsSL https://github.com/spro1/pagehouse/releases/latest/download/install.sh | sh -s -- --share-with /opt/taskhouse --port 3001
-  ```
-  추가하는 제품은 자기 데이터베이스를 띄우지 않고, 먼저 설치한 제품의 compose 네트워크에 붙어 그 데이터베이스를 씁니다(`docker-compose.shared.yml`). DB 비밀번호와 `SECRET_KEY`는 설치 스크립트가 그 설치의 `.env`에서 옮겨 적습니다.
-  먼저 설치한 제품은 계속 실행되며 계정, 비밀번호, 그룹, 로그인 상태, 내용이 그대로입니다. 계정이 이미 있으므로 추가한 제품에는 초기 설정과 설정 토큰이 없고, 기존 계정으로 바로 로그인합니다.
-  처음에는 그 제품의 관리자가 없고, 다른 제품의 관리자가 처음 들어오면 관리자가 됩니다. 설치 뒤 두 제품의 `.env`에 `PUBLIC_URL`을 넣고 각 폴더에서 `compose up -d`로 반영하면 상단 메뉴에 상대 제품 링크가 나옵니다.
-- **함께 운영할 때**: 추가한 제품은 먼저 설치한 제품이 실행 중이어야 동작합니다(데이터베이스가 그쪽에 있음). 각 제품의 백업에는 공유 데이터베이스 전체(두 제품 모두)와 그 제품의 첨부 파일이 들어가고, 한쪽을 복원하면 계정과 두 제품이 모두 그 시점으로 돌아갑니다.
-  `scripts/restore.sh` 전에 다른 제품을 멈추고(그 폴더에서 `compose stop app`) 끝난 뒤 다시 시작하세요. 두 번째 제품을 추가하기 전에 만든 백업은 복원을 거부하고 아무것도 바꾸지 않습니다.
-- **추가한 제품을 다시 없애기**: 그 폴더에서 `compose down -v`를 실행한 뒤 공유 데이터베이스에서 그 제품의 테이블과 메뉴 링크를 지웁니다. Taskhouse를 추가했던 경우 Pagehouse 폴더에서
-  `docker compose exec db psql -U pagehouse -c "DROP SCHEMA taskhouse CASCADE" -c "DELETE FROM accounts.settings WHERE key = 'url:taskhouse'"`, Pagehouse를 추가했던 경우 이 폴더에서
-  `docker compose exec db psql -U taskhouse -c "DROP SCHEMA pagehouse CASCADE" -c "DELETE FROM accounts.settings WHERE key = 'url:pagehouse'"`. 계정은 남습니다.
-- **관련 설정**(`SECRET_KEY`는 설치 스크립트가 맞춰 줌): 같은 값의 `SECRET_KEY`(SSO 클라이언트 비밀을 양쪽이 읽어야 함), `PUBLIC_URL`(상단 메뉴에 상대 제품 링크가 나옴),
-  서브도메인이 서로 다르면 `COOKIE_DOMAIN`에 상위 도메인(`tasks.example.com`과 `wiki.example.com`이면 `example.com`). 같은 호스트 이름이면 `COOKIE_DOMAIN`은 비워 둡니다. 로그인 쿠키가 그 도메인 아래 모든 사이트로 전송되므로, 그 사이트가 모두 직접 운영하는 것일 때만 쓰세요.
-- **SSO**: IdP의 클라이언트 하나에 두 제품의 콜백 주소를 모두 등록합니다. 설정을 바꾸면 다른 제품에는 30초 안에 반영됩니다. `OIDC_ADMIN_GROUP`을 지정했다면 SSO로 로그인할 때마다 두 제품의 관리자 여부가 그 그룹에 따라 정해집니다.
-- 한 제품에서 만든 계정은 다른 제품에서 일반 구성원입니다. 계정을 비활성화하면 양쪽 모두 막힙니다. Pagehouse에서 그룹을 삭제하면 그 그룹에 준 프로젝트 역할도 없어집니다.
-- **이미 계정이 있는 두 설치**는 같은 데이터베이스로 지정해 합칠 수 없습니다. 두 번째 제품이 시작을 거부하고 아무것도 바꾸지 않습니다. 기존 계정 합치기는 아직 지원하지 않습니다.
-- 서버가 서로 다르거나 직접 운영하는 PostgreSQL을 쓸 때는 설치 옵션이 없습니다. 두 제품에 같은 `DATABASE_URL`과 같은 `SECRET_KEY`를 주고, 그 데이터베이스는 직접 백업하세요. 덤프 하나에 두 제품이 모두 들어 있습니다.
-- 두 제품을 따로 쓰려면 기본 설치처럼 데이터베이스를 따로 주면 됩니다. 그러면 아무것도 공유하지 않습니다.
-- 계정 테이블을 바꾸는 마이그레이션은 `ADD COLUMN IF NOT EXISTS`로 쓰고 기본값을 주며, Pagehouse에도 같은 변경을 넣습니다(`server/app.test.ts`의 `PAGEHOUSE_ACCOUNTS`가 상대 쪽 구조의 사본).
-
-### 이미지와 취약점
-
-| 이미지 | 기반 | Trivy | Grype |
-|---|---|---|---|
-| `taskhouse` (앱, 186MB) | node:26-alpine, npm·셸·시스템 OpenSSL 제거 | 0 | 0 |
-| `taskhouse-postgres` (302MB) | postgres:17-alpine, OS 패치, gosu 제거 | 0 | 17 (아래) |
-
-DB 이미지의 Grype 결과는 alpine에 아직 수정 버전이 없는 항목입니다. busybox wget(CVE-2025-60876, wget을 쓰지 않음)과
-OpenSSL 3.5.9의 QUIC·DTLS·CMS·DANE·Suite B 관련 항목(PostgreSQL이 compose 내부망에서 TLS 없이 쓰므로 해당 경로를 타지 않음)입니다.
-alpine에 패치가 나오면 `scripts/upgrade.sh`로 다시 빌드하면 반영됩니다(`apk upgrade`).
-
-DB는 UTF-8 로캘(`en_US.UTF-8`)로 초기화합니다. `C` 로캘이나 PG17 builtin `C.UTF-8`에서는 `pg_trgm`이 한글 trigram을 만들지 않아
-한국어 검색이 인덱스를 못 씁니다(측정 확인, alpine·Debian 모두 UTF-8 libc 로캘이면 정상). 앱이 시작할 때 점검해 경고합니다.
-
-### AI 에이전트 (MCP)
-
-내 설정 → API 토큰에서 토큰을 만들면 Claude Code에 추가하는 명령이 함께 나옵니다.
+**소스에서:**
 
 ```sh
-claude mcp add --transport http taskhouse https://tasks.example.com/api/mcp --header "Authorization: Bearer th_…"
+git clone https://github.com/spro1/taskhouse.git && cd taskhouse
+scripts/install.sh
 ```
 
-도구: `list_projects`, `search_issues`(TQL), `get_issue`, `create_issue`, `update_issue`, `transition_issue`, `get_comments`, `add_comment`.
-설명과 댓글은 Markdown으로 주고받습니다. 모든 도구는 REST API를 토큰 주인으로 호출하므로 권한·워크플로 규칙·변경 이력이 화면과 같습니다.
+설치 스크립트는 무작위 DB 비밀번호와 `SECRET_KEY`를 넣은 `.env`(권한 600)를 만들고, 모두 띄운 뒤 정상이 될 때까지
+기다렸다가 1회용 설정 토큰을 출력합니다. 같은 서버에 Pagehouse가 이미 있다면 `--share-with /opt/pagehouse`를 붙여
+계정을 공유할 수 있습니다. 자세한 내용은 [설치 안내](docs/install.ko.md)에 있습니다.
 
-### 모니터링
+## 첫날 할 일
 
-관리 → 모니터링에서 앱 상태를 봅니다(15초마다 갱신). 백업 지연 경고는 app 컨테이너가 `./backups`를 읽기 전용으로 볼 수 있어야 나옵니다
-(새 docker-compose.yml에 들어 있음). Prometheus는 `.env`에 `METRICS_TOKEN`을 넣고 `Authorization: Bearer <토큰>`으로 `/metrics`를 수집합니다.
-지표는 인스턴스별이고 재시작하면 0부터 셉니다.
+1. **관리자.** `http://<서버>:3000`을 열고 설치 때 출력된 설정 토큰(`docker compose logs app`에도 있음)으로 첫 계정을
+   만듭니다. 이 계정이 관리자가 됩니다.
+2. **HTTPS.** 리버스 프록시 뒤에 두고 `.env`에 `PUBLIC_URL`, `BIND_ADDRESS=127.0.0.1`, `TRUST_PROXY=1`을 넣습니다.
+   [예시](docs/install.ko.md#https)를 보세요.
+3. **팀 초대.** **관리 → 사람과 SSO**에서 초대 링크를 만들어 메신저로 보냅니다. 메일 서버가 없어도 됩니다.
+4. **프로젝트.** 팀이나 제품마다 하나씩 만듭니다. 만든 사람이 관리자입니다. 프로젝트 **설정**에서 사람이나 그룹을
+   추가하고, 기본 상태(할 일, 진행 중, 리뷰 중, 완료)가 맞지 않으면 고칩니다.
+5. **백업.** `backups/`가 매일 쌓이는지 확인하고, `.env`와 함께 서버 밖으로 복사해 둡니다.
+6. **메일(선택).** `.env`에 `SMTP_URL`을 넣으면 알림 메일과 "비밀번호를 잊으셨나요?" 링크가 동작합니다. 없으면
+   **관리 → 사람과 SSO**에서 관리자가 재설정 링크나 임시 비밀번호를 발급합니다.
+7. **SSO(선택).** [SSO 안내](docs/sso.ko.md)를 보세요.
 
-### SSO (OIDC)
+## 운영
 
-관리 → SSO 화면에서 설정하거나(클라이언트 비밀은 `SECRET_KEY`로 암호화해 저장), `.env`에 `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`을 넣습니다(환경변수가 있으면 그쪽이 우선이고 화면은 읽기 전용). 그리고 IdP에는 리다이렉트 URI `$PUBLIC_URL/api/auth/oidc/callback`과
-로그아웃 후 이동 주소 `$PUBLIC_URL/`을 등록합니다. 그룹은 `groups` 클레임(`OIDC_GROUPS_CLAIM`)에서 로그인할 때마다 가져오고,
-`OIDC_ADMIN_GROUP` 구성원은 사이트 관리자가 됩니다. 로그아웃하면 IdP 세션도 끝납니다.
-계정은 IdP의 `sub`로 찾습니다. 처음 로그인하면 같은 이메일의 기존 로컬 계정에 연결하거나 새 계정을 만드는데(`OIDC_AUTO_CREATE=0`이면 만들지 않음),
-둘 다 IdP가 확인한 이메일(`email_verified`)일 때만 합니다. `email_verified`를 보내지 않는 IdP라면 `OIDC_TRUST_EMAIL=1`로 허용할 수 있습니다(IdP가 `false`라고 하면 여전히 거부).
-이미 `sub`로 연결된 사람은 이메일 확인 여부와 상관없이 로그인합니다.
-Pagehouse와 계정을 공유하면 SSO 설정도 하나입니다. IdP의 클라이언트 하나에 두 제품의 리다이렉트 URI와 로그아웃 후 이동 주소를 모두 등록하고, 두 제품의 `SECRET_KEY`를 같게 둡니다.
-어느 제품에서든 SSO로 한 번 로그인하면 양쪽에 로그인되고, `OIDC_ADMIN_GROUP`은 두 제품의 관리자 여부를 함께 정합니다. `.env`의 `OIDC_*`는 제품마다 따로이므로 양쪽에 모두 넣거나 모두 비워 두세요.
-`PASSWORD_LOGIN=0`(SSO 전용)이어도 비밀번호가 있는 관리자는 로그인 화면의 "관리자 비상 로그인"으로 들어올 수 있습니다.
+| 작업 | 방법 |
+|---|---|
+| 백업 | 24시간마다 `backups/`에 자동(14개 보관). 수동: `scripts/backup.sh` |
+| 복원 | `scripts/restore.sh <백업>`. 현재 상태를 먼저 백업합니다 |
+| 업그레이드 | [버전별 안내](docs/upgrading.ko.md)를 읽고, 새 파일을 설치 폴더에 덮어쓴 뒤 `scripts/upgrade.sh`(번들이면 `images.tar`). 먼저 백업하고 `.env`와 데이터는 그대로 둡니다 |
+| 상태 | `curl localhost:3000/healthz`. **관리 → 모니터링**에서 요청·오류·DB·백업·저장 공간. `METRICS_TOKEN`을 넣으면 `/metrics`로 Prometheus 수집 |
+| 로그 | `docker compose logs app` |
 
-Keycloak 26으로 확인했습니다. 로컬에서 직접 해 보려면 `scripts/keycloak-dev.sh`가 테스트용 Keycloak(realm·client·그룹 매퍼·테스트 사용자)을 띄웁니다.
+데이터는 compose 볼륨(데이터베이스와 첨부)에, 백업은 설치 폴더의 `backups/`에 있습니다.
+
+## 보안
+
+- **내가 켜지 않으면 밖으로 나가는 것이 없습니다.** 사용 통계도 외부에서 불러오는 자원도 없습니다. 밖으로 나가는
+  요청은 직접 설정한 SSO, 메일, 웹훅뿐이고, 웹훅은 루프백·링크로컬 주소로 보내지 않습니다.
+- **권한은 서버에서 검사합니다.** 볼 수 없는 이슈는 API, 검색, 첨부, 알림, MCP 어디서든 404입니다.
+- **브라우저 보호:** 엄격한 Content-Security-Policy와 프레임 차단, 다른 사이트에서 온 변경 요청 거부, 요청 크기 제한,
+  주소·계정별 로그인 시도 제한. 저장된 서식 문서는 HTML 문자열이 아니라 React 요소로만 그립니다.
+- **계정:** SSO는 IdP가 확인한 이메일로만 계정을 연결하거나 만듭니다. DB에 저장하는 비밀값(웹훅 키, SSO 클라이언트
+  비밀)은 `SECRET_KEY`로 암호화합니다. API 토큰은 만료가 있고 계정을 비활성화하면 폐기됩니다.
+- **컨테이너:** root가 아닌 사용자로 실행, 앱 이미지에 패키지 관리자와 셸 없음, 고칠 수 있는 CVE가 있으면 CI 실패
+  (Trivy), Dependabot이 매주 업데이트 PR을 엽니다.
+
+취약점은 [SECURITY.md](SECURITY.md)의 방법으로 비공개 제보해 주세요.
+
+## FAQ
+
+**인터넷이 필요한가요?**
+아니요. 설치(릴리스 번들), 사용, 업그레이드 모두 인터넷 없이 됩니다.
+
+**Pagehouse와 계정을 같이 쓸 수 있나요?**
+네. 같은 PostgreSQL 데이터베이스를 쓰면 사용자·로그인·그룹·SSO 설정을 공유하고 서로 메뉴로 오갑니다. 역할과 권한은
+제품마다 따로입니다. [Pagehouse와 함께 쓰기](docs/install.ko.md#pagehouse와-함께-쓰기)를 보세요.
+
+**AI 에이전트가 이슈를 다룰 수 있나요?**
+네. 개인 API 토큰으로 `/api/mcp`(MCP)에 연결합니다. **내 설정 → API 토큰**에 Claude Code용 명령이 나옵니다.
+[AI 에이전트](docs/install.ko.md#ai-에이전트-mcp)를 보세요.
+
+**Jira에서 옮겨 올 수 있나요?**
+아직 Jira 가져오기는 없습니다. REST API나 MCP로 이슈를 만들 수 있습니다.
+
+**서버가 죽으면요?**
+매일 백업이 `backups/`에 쌓입니다. 이 폴더와 `.env`를 서버 밖에 복사해 두면 새 서버에 설치한 뒤
+`scripts/restore.sh`로 되살릴 수 있습니다.
+
+## 로드맵
+
+- Git·CI 연동
+- 버전과 릴리스
+- 차트(번다운, 속도)
+- 사용자 정의 필드와 자동화 규칙
+- 타임라인
+- 이슈별 열람 제한
+
+## 문서
+
+- [설치 안내](docs/install.ko.md): 설치 방법, HTTPS, 백업, Pagehouse와 함께 쓰기, 모니터링, MCP, 이미지
+- [업그레이드 안내](docs/upgrading.ko.md): 버전마다 바뀐 것과 할 일
+- [SSO 안내](docs/sso.ko.md): OpenID Connect 설정, 계정 연결, 그룹과 관리자
+- [기여 방법](CONTRIBUTING.md) · [보안 정책](SECURITY.md)
 
 ## 개발
 
@@ -163,7 +176,20 @@ npm run dev:db                  # Docker 없이 PostgreSQL 17 (포트 55432, .de
 DATABASE_URL=postgres://taskhouse:taskhouse@localhost:55432/taskhouse npm run dev
 npm test                        # 임베디드 PostgreSQL로 통합 테스트
 npm run typecheck && npm audit
-# 이미지 검사: podman save -o app.tar localhost/taskhouse:latest && trivy image --input app.tar && grype docker-archive:app.tar
 ```
 
-의존성은 최신 안정판만 쓰고 `npm audit`이 0건이어야 합니다. 이미지 빌드도 `npm audit --omit=dev`가 실패하면 멈춥니다.
+구성:
+
+- `server/`: API, 검색(TQL), 백그라운드 작업, 마이그레이션
+- `web/`: React + Tiptap, 화면 문구는 `web/i18n.ts`
+- `scripts/`: 설치, 업그레이드, 백업, 복원, 오프라인 번들
+- `docker/postgres/`: 보안 강화 PostgreSQL 이미지
+
+의존성은 최신 안정판만 쓰고 `npm audit`이 0건이어야 합니다. 공유 계정 테이블을 바꾸는 마이그레이션은
+`ADD COLUMN IF NOT EXISTS`로 쓰고, Pagehouse에도 같은 변경을 넣습니다.
+
+## 라이선스
+
+[Apache-2.0](LICENSE): 사내 사용, 수정, 재배포가 자유롭습니다.
+
+Jira는 Atlassian의 상표입니다. Taskhouse는 Atlassian과 관계가 없고 Atlassian의 보증을 받지 않았습니다.
