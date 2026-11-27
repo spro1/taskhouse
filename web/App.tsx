@@ -8,7 +8,7 @@ import { MySettings, Settings } from './Settings.tsx'
 import { Search } from './Search.tsx'
 import { Admin } from './Admin.tsx'
 
-export type Me = { id: number; name: string; email: string; isAdmin: boolean; locale: Lang | null; mustChangePassword: boolean }
+export type Me = { id: number; name: string; email: string; isAdmin: boolean; locale: Lang | null; mustChangePassword: boolean; pagehouseUrl: string | null }
 
 export const nav = (to: string) => {
   history.pushState(null, '', to)
@@ -190,6 +190,7 @@ function Shell({ me, path }: { me: Me; path: string }) {
     <>
       <header className="top">
         <Link to="/" className="brand">Taskhouse</Link>
+        {me.pagehouseUrl && <a href={me.pagehouseUrl} className="ghost">Pagehouse</a>}
         <button className="search" onClick={() => setQuick(true)}>{t('nav.quick')} <kbd>⌘K</kbd></button>
         <Link to="/search" className="ghost">{t('nav.search')}</Link>
         <span className="grow" />

@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createApp } from './app.ts'
 import { openDb, type Db } from './db.ts'
-import { ensureSetupToken } from './auth.ts'
+import { ensureSetupToken, hashPassword } from './auth.ts'
 import { pruneFiles, runJobs, sealWebhookSecrets } from './jobs.ts'
 import { csvCell } from './export.ts'
 import { sendDigests, useTestTransport } from './mail.ts'
@@ -32,7 +32,7 @@ before(async () => {
   dbUrl = t.url
   assert.match(new URL(t.url).pathname, /_test$/) // the test wipes it
   db = await openDb(t.url)
-  await db.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public')
+  await db.query('DROP SCHEMA IF EXISTS public, taskhouse, accounts CASCADE; CREATE SCHEMA public')
   await db.end()
   db = await openDb(t.url)
   dataDir = mkdtempSync(join(tmpdir(), 'taskhouse-'))
@@ -409,6 +409,8 @@ test('upgrade: later migrations apply to a database made by 0.1 (001 only) with 
   const r = (await up.query(`SELECT grams, (SELECT email_notify FROM users) AS notify, (SELECT count(*)::int FROM schema_migrations) AS n FROM issues`)).rows[0]
   assert.deepEqual(r.grams.sort(), ['배포', '배치', '장애', '재배', '파드'].sort())
   assert.equal(r.notify, true)
+  // An install from before schemas stays in public; only the account tables move, with their rows.
+  assert.deepEqual((await up.query(`SELECT to_regclass('accounts.users')::text AS users, to_regclass('public.issues')::text AS issues, (SELECT count(*)::int FROM sessions) AS n`)).rows[0], { users: 'users', issues: 'issues', n: 0 })
   const listen = new pg.Client(url)
   await listen.connect()
   await listen.query('LISTEN th_live')
@@ -418,6 +420,55 @@ test('upgrade: later migrations apply to a database made by 0.1 (001 only) with 
   await listen.end()
   await up.end()
   await db.query('DROP DATABASE taskhouse_upgrade_test')
+})
+
+// The account tables as Pagehouse (026) leaves them. Change it when Pagehouse changes them: the two must stay compatible.
+const PAGEHOUSE_ACCOUNTS = `CREATE SCHEMA accounts;
+  CREATE TABLE accounts.users (id BIGSERIAL PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT NOT NULL, password_hash TEXT NOT NULL DEFAULT '',
+    role TEXT NOT NULL DEFAULT 'member', created_at TIMESTAMPTZ NOT NULL DEFAULT now(), oidc_sub TEXT UNIQUE, email_notify BOOLEAN NOT NULL DEFAULT true,
+    last_sso_at TIMESTAMPTZ, theme TEXT, locale TEXT, webhook_url TEXT, disabled_at TIMESTAMPTZ, avatar TEXT, must_change_password BOOLEAN NOT NULL DEFAULT false, last_login_at TIMESTAMPTZ);
+  CREATE TABLE accounts.sessions (token_hash TEXT PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES accounts.users(id) ON DELETE CASCADE, expires_at TIMESTAMPTZ NOT NULL);
+  CREATE TABLE accounts.groups (id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+  CREATE TABLE accounts.group_members (group_id BIGINT NOT NULL REFERENCES accounts.groups(id) ON DELETE CASCADE, user_id BIGINT NOT NULL REFERENCES accounts.users(id) ON DELETE CASCADE, source TEXT, PRIMARY KEY (group_id, user_id));
+  CREATE TABLE accounts.settings (key TEXT PRIMARY KEY, value JSONB NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`
+
+test('shared accounts: Taskhouse installed into a database where Pagehouse already keeps the accounts', async () => {
+  await db.query('DROP DATABASE IF EXISTS taskhouse_join_test')
+  await db.query('CREATE DATABASE taskhouse_join_test')
+  const url = dbUrl.replace(/\/[^/]+$/, '/taskhouse_join_test')
+  const ph = new pg.Client(url)
+  await ph.connect()
+  // the admin's password is "pagehouse-pw-1", hashed the way both products do
+  await ph.query(PAGEHOUSE_ACCOUNTS)
+  await ph.query(`INSERT INTO accounts.users (email, name, password_hash, role) VALUES ('boss@x.test', 'Boss', $1, 'admin'), ('dev@x.test', 'Dev', $1, 'member')`, [hashPassword('pagehouse-pw-1')])
+  await ph.query(`INSERT INTO accounts.settings (key, value) VALUES ('url:pagehouse', '"https://wiki.x.test"')`)
+  await ph.end()
+  const joined = await openDb(url)
+  try {
+    const where = (await joined.query(`SELECT tablename, schemaname FROM pg_tables WHERE tablename IN ('users', 'sessions', 'groups', 'group_members', 'issues') ORDER BY 1`)).rows
+    assert.deepEqual(where.map((r) => `${r.schemaname}.${r.tablename}`), ['accounts.group_members', 'accounts.groups', 'taskhouse.issues', 'accounts.sessions', 'accounts.users'])
+    await assert.rejects(joined.query(`INSERT INTO api_tokens (user_id, name, token_hash, expires_at) VALUES (999, 't', 'h', now())`), /foreign key/)
+    const api = createApp(joined, mkdtempSync(join(tmpdir(), 'th-join-')))
+    const call = async (method: string, path: string, body?: unknown, cookie = '') => {
+      const res = await api.request(path, { method, headers: { 'content-type': 'application/json', cookie, 'sec-fetch-site': 'same-origin' }, body: body ? JSON.stringify(body) : undefined })
+      return { http: res.status, body: await res.json().catch(() => null), sid: res.headers.get('set-cookie')?.split(';')[0] ?? '' }
+    }
+    assert.equal((await call('GET', '/api/auth/state')).body.setupRequired, false) // the accounts are already there
+    // A Pagehouse account signs in with its password. Nobody is a Taskhouse admin yet, so the Pagehouse admin becomes one; a member does not.
+    const dev = await call('POST', '/api/auth/login', { email: 'dev@x.test', password: 'pagehouse-pw-1' })
+    assert.equal((await call('GET', '/api/me', undefined, dev.sid)).body.isAdmin, false)
+    const boss = await call('POST', '/api/auth/login', { email: 'boss@x.test', password: 'pagehouse-pw-1' })
+    const me = (await call('GET', '/api/me', undefined, boss.sid)).body
+    assert.equal(me.isAdmin, true)
+    assert.equal(me.pagehouseUrl, 'https://wiki.x.test')
+    assert.equal((await call('GET', '/api/admin/users', undefined, boss.sid)).http, 200)
+    // An account Taskhouse creates is a Pagehouse member by that table's default.
+    await joined.query(`INSERT INTO users (email, name, oidc_sub) VALUES ('new@x.test', 'New', 'sub-new')`)
+    assert.equal((await joined.query(`SELECT role FROM users WHERE email = 'new@x.test'`)).rows[0].role, 'member')
+  } finally {
+    await joined.end()
+    await db.query('DROP DATABASE taskhouse_join_test') // not WITH (FORCE): it would kill connections the pool is still closing
+  }
 })
 
 test('SSO: sign-in, groups, and every check that should refuse', async () => {
@@ -457,7 +508,7 @@ test('SSO: sign-in, groups, and every check that should refuse', async () => {
     assert.equal(ok.to, '/')
     assert.equal(ok.me.email, 'dana@example.test')
     assert.equal(ok.me.isAdmin, true) // admin group
-    assert.ok((await admin.list('GET', '/api/groups')).some((g: any) => g.name === 'th-dev' && g.source === 'oidc'))
+    assert.ok((await admin.list('GET', '/api/groups')).some((g: any) => g.name === 'th-dev'))
     // Signing out sends the browser to the IdP to end its session too, with the ID token as the hint.
     const out = await (await app.request('/api/auth/logout', { method: 'POST', headers: { cookie: ok.cookies } })).json()
     const end = new URL(out.redirect)
@@ -499,7 +550,7 @@ test('SSO: sign-in, groups, and every check that should refuse', async () => {
     assert.equal(saved.source, 'admin')
     assert.equal(saved.hasSecret, true)
     assert.equal(saved.clientSecret, undefined) // never sent back
-    assert.match((await db.query(`SELECT value->>'clientSecret' AS s FROM settings WHERE key = 'sso'`)).rows[0].s, /^enc:v1:/)
+    assert.match((await db.query(`SELECT value->>'clientSecret' AS s FROM accounts.settings WHERE key = 'sso'`)).rows[0].s, /^enc:v1:/)
     assert.equal((await client().json('GET', '/api/auth/state')).sso.label, '사내 SSO')
     const viaScreen = await sso({ sub: 's-9', email: 'erin@example.test', email_verified: true, groups: ['th-admins'] })
     assert.equal(viaScreen.me.isAdmin, true)
@@ -507,7 +558,7 @@ test('SSO: sign-in, groups, and every check that should refuse', async () => {
 
     // autoCreate / trustEmail. Settings saved before these options existed read as the defaults, which are the
     // original behaviour: create accounts on first sign-in, link or create only with a verified email.
-    await db.query(`UPDATE settings SET value = value - 'autoCreate' - 'trustEmail' WHERE key = 'sso'`)
+    await db.query(`UPDATE accounts.settings SET value = value - 'autoCreate' - 'trustEmail' WHERE key = 'sso'`)
     const old = await admin.json('GET', '/api/admin/sso')
     assert.equal(old.autoCreate, true)
     assert.equal(old.trustEmail, false)
