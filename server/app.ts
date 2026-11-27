@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { join } from 'node:path'
 import { bodyLimit } from 'hono/body-limit'
 import { secureHeaders } from 'hono/secure-headers'
 import type { Db } from './db.ts'
@@ -9,6 +10,10 @@ import { registerIssues } from './issues.ts'
 import { registerSearch } from './search.ts'
 import { registerLive } from './live.ts'
 import { registerExport } from './export.ts'
+import { metricsMiddleware, recordError } from './metrics.ts'
+import { registerMonitor } from './monitor.ts'
+import { registerMcp } from './mcp.ts'
+import { registerAvatars } from './avatar.ts'
 
 /** dbUrl turns on live updates (they need their own LISTEN connection). */
 export function createApp(db: Db, dataDir: string, dbUrl?: string) {
@@ -16,8 +21,10 @@ export function createApp(db: Db, dataDir: string, dbUrl?: string) {
   app.onError((e, c) => {
     if (e instanceof HttpError) return fail(c, e.status, e.message, e.extra)
     console.error(e)
+    recordError(c.req.method, c.req.path, 500, (e as Error).message || String(e))
     return fail(c, 500, 'internal')
   })
+  app.use('*', metricsMiddleware)
   // CSP: only this server's own scripts; inline style attributes are used by React. No framing (clickjacking).
   app.use('*', secureHeaders({
     contentSecurityPolicy: {
@@ -48,7 +55,10 @@ export function createApp(db: Db, dataDir: string, dbUrl?: string) {
   registerIssues(app, db, dataDir)
   registerSearch(app, db)
   registerExport(app, db)
+  registerMcp(app)
+  registerAvatars(app, db, join(dataDir, 'files'))
   const live = dbUrl ? registerLive(app, db, dbUrl) : null
+  registerMonitor(app, db, join(dataDir, 'files'), () => live)
   app.all('/api/*', (c) => fail(c, 404, 'not_found'))
   return Object.assign(app, { live })
 }

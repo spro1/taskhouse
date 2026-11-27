@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, CATEGORY_NAMES, message, type Project, type Ref, type Status } from './api.ts'
 import { toast, type Me } from './App.tsx'
 import { lang, LANGS, setLang, t, type Lang } from './i18n.ts'
+import { Select } from './Select.tsx'
+import { Avatar, bumpAvatar } from './icons.tsx'
 
 const ROLES = ['viewer', 'reporter', 'member', 'admin'] as const
 
@@ -11,11 +13,8 @@ export function Settings({ project, reload, me }: { project: Project; reload: ()
     <div className="settings">
       <section>
         <h3>{t('settings.visibility')}</h3>
-        <select value={project.visibility} onChange={(e) => act(api('PATCH', `/api/projects/${project.key}`, { visibility: e.target.value }))}>
-          <option value="private">{t('vis.private.long')}</option>
-          <option value="view">{t('vis.view.long')}</option>
-          <option value="edit">{t('vis.edit.long')}</option>
-        </select>
+        <Select label={t('settings.visibility')} value={project.visibility} onChange={(v) => act(api('PATCH', `/api/projects/${project.key}`, { visibility: v }))}
+          options={(['private', 'view', 'edit'] as const).map((v) => ({ value: v, label: t(`vis.${v}.long`) }))} />
       </section>
       {/* Keyed by the saved data, so after a save the editors start again from what the server has (with real ids). */}
       <Roles key={JSON.stringify(project.roles)} project={project} act={act} me={me} />
@@ -53,19 +52,15 @@ function Roles({ project, act, me }: { project: Project; act: (p: Promise<unknow
           <li key={i}>
             {r.user ? r.user.name : t('roles.group', { name: r.group!.name })}
             <span className="grow" />
-            <select value={r.role} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, role: e.target.value } : x)))}>
-              {ROLES.map((k) => <option key={k} value={k}>{t(`role.${k}`)}</option>)}
-            </select>
+            <Select label={t('roles.title')} value={r.role} onChange={(v) => setRows(rows.map((x, j) => (j === i ? { ...x, role: v } : x)))}
+              options={ROLES.map((k) => ({ value: k, label: t(`role.${k}`) }))} />
             <button className="ghost" disabled={r.user?.id === me.id} onClick={() => setRows(rows.filter((_, j) => j !== i))}>×</button>
           </li>
         ))}
       </ul>
       <div className="inline">
-        <select value={pick} onChange={(e) => setPick(e.target.value)}>
-          <option value="">{t('roles.pick')}</option>
-          {users.map((u) => <option key={`u${u.id}`} value={`u:${u.id}`}>{u.name}</option>)}
-          {groups.map((g) => <option key={`g${g.id}`} value={`g:${g.id}`}>{t('roles.group', { name: g.name })}</option>)}
-        </select>
+        <Select label={t('roles.pick')} value={pick} onChange={setPick} placeholder={t('roles.pick')}
+          options={[...users.map((u) => ({ value: `u:${u.id}`, label: u.name, icon: <Avatar user={u} size="sm" /> })), ...groups.map((g) => ({ value: `g:${g.id}`, label: t('roles.group', { name: g.name }) }))]} />
         <button onClick={add} disabled={!pick}>{t('common.add')}</button>
         <button className="primary" onClick={() => act(api('PUT', `/api/projects/${project.key}/roles`, { roles: rows.map((r) => ({ user: r.user?.id, group: r.group?.id, role: r.role })) }))}>{t('roles.save')}</button>
       </div>
@@ -73,7 +68,7 @@ function Roles({ project, act, me }: { project: Project; act: (p: Promise<unknow
   )
 }
 
-type Row = { key: string; id?: number; name: string; category: 0 | 1 | 2 }
+type Row = { key: string; id?: number; name: string; category: 0 | 1 | 2; onBoard: boolean }
 type Rules = { conditions?: { kind: string; level?: number }[]; validators?: { kind: string; fields?: string[] }[]; post?: { kind: string; field: string; value: string }[] }
 type Move = { name: string; from: string | null; to: string; rules: Rules }
 // The rule kinds the server knows (server/issues.ts), as checkboxes.
@@ -116,7 +111,7 @@ function Workflow({ project, act }: { project: Project; act: (p: Promise<unknown
   const setMove = (i: number, v: Partial<Move>) => setMoves(moves.map((m, j) => (j === i ? { ...m, ...v } : m)))
   const nameOf = (key: string | null) => (key == null ? null : rows.find((r) => r.key === key)?.name ?? '')
   const save = () => act(api('PUT', `/api/projects/${project.key}/workflow`, {
-    statuses: rows.map(({ id, name, category }) => ({ id, name, category })),
+    statuses: rows.map(({ id, name, category, onBoard }) => ({ id, name, category, onBoard })),
     transitions: moves.map((m) => ({ name: m.name || nameOf(m.to), from: nameOf(m.from), to: nameOf(m.to), rules: m.rules })),
   }))
   return (
@@ -127,15 +122,18 @@ function Workflow({ project, act }: { project: Project; act: (p: Promise<unknown
         {rows.map((r, i) => (
           <li key={r.key}>
             <input value={r.name} onChange={(e) => set(i, { name: e.target.value })} aria-label={t('workflow.statusName')} />
-            <select value={r.category} onChange={(e) => set(i, { category: Number(e.target.value) as 0 | 1 | 2 })} aria-label={t('workflow.category')}>
-              {CATEGORY_NAMES.map((n, c) => <option key={c} value={c}>{n}</option>)}
-            </select>
+            <Select label={t('workflow.category')} value={r.category} onChange={(v) => set(i, { category: v })}
+              options={CATEGORY_NAMES.map((n, c) => ({ value: c as 0 | 1 | 2, label: n, icon: <span className={`dot c${c}`} /> }))} />
+            <label className="check on-board" title={t('workflow.onBoard.hint')}>
+              <input type="checkbox" checked={r.onBoard} disabled={r.onBoard && rows.filter((x) => x.onBoard).length === 1} onChange={(e) => set(i, { onBoard: e.target.checked })} />
+              {t('workflow.onBoard')}
+            </label>
             <button className="ghost" onClick={() => up(i)} aria-label={t('workflow.up')}>↑</button>
             <button className="ghost" onClick={() => drop(i)} aria-label={t('common.delete')}>×</button>
           </li>
         ))}
       </ul>
-      <button onClick={() => setRows([...rows, { key: `n${Date.now()}`, name: '', category: 1 }])}>{t('workflow.addStatus')}</button>
+      <button onClick={() => setRows([...rows, { key: `n${Date.now()}`, name: '', category: 1, onBoard: true }])}>{t('workflow.addStatus')}</button>
 
       <h3 style={{ marginTop: 20 }}>{t('workflow.transitions')}</h3>
       <p className="muted">{moves.length ? t('workflow.onlyListed') : t('workflow.free')}</p>
@@ -143,14 +141,10 @@ function Workflow({ project, act }: { project: Project; act: (p: Promise<unknown
         <div key={i} className="move">
           <div className="inline">
             <input placeholder={t('workflow.moveName')} aria-label={t('workflow.moveName')} value={m.name} onChange={(e) => setMove(i, { name: e.target.value })} />
-            <select value={m.from ?? ''} onChange={(e) => setMove(i, { from: e.target.value || null })} aria-label={t('workflow.from')}>
-              <option value="">{t('workflow.fromAny')}</option>
-              {rows.map((r) => <option key={r.key} value={r.key}>{r.name}</option>)}
-            </select>
+            <Select label={t('workflow.from')} value={m.from ?? ''} onChange={(v) => setMove(i, { from: v || null })}
+              options={[{ value: '', label: t('workflow.fromAny') }, ...rows.map((r) => ({ value: r.key, label: r.name }))]} />
             →
-            <select value={m.to} onChange={(e) => setMove(i, { to: e.target.value })} aria-label={t('workflow.to')}>
-              {rows.map((r) => <option key={r.key} value={r.key}>{r.name}</option>)}
-            </select>
+            <Select label={t('workflow.to')} value={m.to} onChange={(v) => setMove(i, { to: v })} options={rows.map((r) => ({ value: r.key, label: r.name }))} />
             <button className="ghost" onClick={() => setMoves(moves.filter((_, j) => j !== i))} aria-label={t('workflow.deleteMove')}>×</button>
           </div>
           {(Object.keys(GROUP_NAMES) as (keyof Rules)[]).map((g) => (
@@ -195,7 +189,7 @@ function Webhooks({ project }: { project: Project }) {
         e.preventDefault()
         api('POST', `/api/projects/${project.key}/webhooks`, { url, format }).then((r) => { setUrl(''); load(); if (format === 'json') prompt(t('hooks.secret'), r.secret) }, (x) => toast(message(x)))
       }}>
-        <select value={format} onChange={(e) => setFormat(e.target.value)}><option value="chat">Slack·Mattermost·Teams</option><option value="json">{t('hooks.json')}</option></select>
+        <Select label={t('hooks.json')} value={format} onChange={setFormat} options={[{ value: 'chat', label: 'Slack·Mattermost·Teams' }, { value: 'json', label: t('hooks.json') }]} />
         <input type="url" required placeholder="https://…" value={url} onChange={(e) => setUrl(e.target.value)} />
         <button>{t('common.add')}</button>
       </form>
@@ -204,16 +198,16 @@ function Webhooks({ project }: { project: Project }) {
 }
 
 export function MySettings({ me }: { me: Me }) {
-  const [mine, setMine] = useState<{ emailNotify: boolean; mail: boolean; hasPassword: boolean }>()
+  const [mine, setMine] = useState<{ emailNotify: boolean; mail: boolean; hasPassword: boolean; avatar: boolean }>()
   useEffect(() => { api('GET', '/api/me').then(setMine) }, [])
   return (
     <div className="settings">
       <h1>{t('me.title')} <span className="muted">{me.email}</span></h1>
+      <Photo me={me} has={!!mine?.avatar} />
       <section>
         <h3>{t('me.language')}</h3>
-        <select aria-label={t('me.language')} value={lang} onChange={(e) => api('PATCH', '/api/me', { locale: e.target.value }).then(() => setLang(e.target.value as Lang), (x) => toast(message(x)))}>
-          {Object.entries(LANGS).map(([code, l]) => <option key={code} value={code}>{l.label}</option>)}
-        </select>
+        <Select label={t('me.language')} value={lang as string} onChange={(v) => api('PATCH', '/api/me', { locale: v }).then(() => setLang(v as Lang), (x) => toast(message(x)))}
+          options={Object.entries(LANGS).map(([code, l]) => ({ value: code, label: l.label }))} />
       </section>
       <section>
         <h3>{t('me.mail')}</h3>
@@ -250,24 +244,81 @@ function Password({ hasPassword }: { hasPassword: boolean }) {
   )
 }
 
+/** Crops the middle square and scales it to 256 px, so uploads are small whatever the camera made. */
+async function squareImage(file: File, size = 256): Promise<Blob> {
+  const img = await createImageBitmap(file)
+  const side = Math.min(img.width, img.height)
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = size
+  canvas.getContext('2d')!.drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, size, size)
+  return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('image'))), 'image/jpeg', 0.88))
+}
+
+function Photo({ me, has }: { me: Me; has: boolean }) {
+  const [version, setVersion] = useState(0)
+  const [present, setPresent] = useState(has)
+  useEffect(() => setPresent(has), [has])
+  const pick = useRef<HTMLInputElement>(null)
+  // The sidebar and every list redraw with the new photo.
+  const changed = () => { setVersion(bumpAvatar()); dispatchEvent(new CustomEvent('th:avatar')) }
+  return (
+    <section className="profile">
+      <h3>{t('me.photo')}</h3>
+      <div className="profile-row">
+        <Avatar key={version} user={me} size="xl" />
+        <div>
+          <div className="inline">
+            <button type="button" onClick={() => pick.current?.click()}>{t(present ? 'me.photo.change' : 'me.photo.add')}</button>
+            {present && <button type="button" className="ghost danger" onClick={() => api('DELETE', '/api/me/avatar').then(() => { setPresent(false); changed() })}>{t('me.photo.remove')}</button>}
+          </div>
+          <p className="muted small">{t('me.photo.hint')}</p>
+        </div>
+        <input ref={pick} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={async (e) => {
+          const f = e.target.files?.[0]
+          e.target.value = ''
+          if (!f) return
+          try {
+            const form = new FormData()
+            form.append('file', new File([await squareImage(f)], 'avatar.jpg', { type: 'image/jpeg' }))
+            await api('PUT', '/api/me/avatar', form)
+            setPresent(true)
+            changed()
+          } catch (x) { toast(message(x)) }
+        }} />
+      </div>
+    </section>
+  )
+}
+
 function Tokens() {
   const [list, setList] = useState<any[]>([])
   const [name, setName] = useState('')
+  const [days, setDays] = useState(90)
   const [shown, setShown] = useState('')
   const load = () => api('GET', '/api/me/tokens').then(setList)
   useEffect(() => { load() }, [])
+  const url = `${location.origin}/api/mcp`
+  const copy = (v: string) => navigator.clipboard?.writeText(v).then(() => toast(t('common.copied')), () => {})
   return (
     <section>
       <h3>{t('tokens.title')}</h3>
       <p className="muted">{t('tokens.sub')}</p>
-      {shown && <p className="token">{t('tokens.once')} <code>{shown}</code></p>}
-      <ul className="list">
-        {list.map((k) => <li key={k.id}>{k.name} <span className="muted">{t('tokens.expires', { date: new Date(k.expiresAt).toLocaleDateString() })}</span><button className="ghost" onClick={() => api('DELETE', `/api/me/tokens/${k.id}`).then(load)}>{t('tokens.revoke')}</button></li>)}
-      </ul>
-      <form className="inline" onSubmit={(e) => { e.preventDefault(); api('POST', '/api/me/tokens', { name }).then((r) => { setShown(r.token); setName(''); load() }) }}>
+      <form className="inline" onSubmit={(e) => { e.preventDefault(); api('POST', '/api/me/tokens', { name, days }).then((r) => { setShown(r.token); setName(''); load() }, (x) => toast(message(x))) }}>
         <input required placeholder={t('tokens.name')} aria-label={t('tokens.name')} value={name} onChange={(e) => setName(e.target.value)} />
-        <button>{t('common.create')}</button>
+        <Select label={t('tokens.days')} value={days} onChange={setDays} options={[30, 90, 365].map((d) => ({ value: d, label: t('tokens.daysN', { n: d }) }))} />
+        <button className="primary">{t('common.create')}</button>
       </form>
+      {shown && (
+        <>
+          <p className="token">{t('tokens.once')} <code>{shown}</code> <button className="link" onClick={() => copy(shown)}>{t('common.copy')}</button></p>
+          <p className="token">{t('tokens.claude')} <code>{`claude mcp add --transport http taskhouse ${url} --header "Authorization: Bearer ${shown}"`}</code>{' '}
+            <button className="link" onClick={() => copy(`claude mcp add --transport http taskhouse ${url} --header "Authorization: Bearer ${shown}"`)}>{t('common.copy')}</button></p>
+        </>
+      )}
+      <p className="muted small">{t('tokens.endpoint')} <code>{url}</code> <button className="link" onClick={() => copy(url)}>{t('common.copy')}</button></p>
+      <ul className="list">
+        {list.map((k) => <li key={k.id}>{k.name} <span className="grow muted small">{t('tokens.expires', { date: new Date(k.expiresAt).toLocaleDateString() })}</span><button className="ghost sm danger" onClick={() => api('DELETE', `/api/me/tokens/${k.id}`).then(load)}>{t('tokens.revoke')}</button></li>)}
+      </ul>
     </section>
   )
 }

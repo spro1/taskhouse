@@ -27,8 +27,12 @@ and one PostgreSQL. Open source under the Apache-2.0 license. Report security pr
 - Descriptions and comments are Tiptap rich text with @mentions (mentioned people are notified). Stored documents
   are drawn with React elements only, never HTML strings, so no script can get in
 - Workflows: free movement by default. Statuses and transition rules (who, conditions, what happens after) are
-  edited on the settings screen
+  edited on the settings screen. Each status can be shown on the board or left off it
 - Board (drag to transition and reorder), backlog, sprints (unfinished issues move on start and completion)
+- Screens: the same sidebar, design tokens, light and dark theme (saved with the account) and profile photo as
+  Pagehouse. Pick lists with icons and photos; parent issues and links are chosen by searching. `C` opens the
+  create-issue window anywhere; quick filters on the board (search, assignee, only mine); icons for type and
+  priority, and status marks
 - Live updates: board, backlog and issue screens show other people's changes right away (WebSocket +
   LISTEN/NOTIFY; only ids go over the socket)
 - Search: TQL (a JQL subset with `CHANGED`, `linked`, `membersOf()` and more) and filter chips share one engine.
@@ -44,9 +48,15 @@ and one PostgreSQL. Open source under the Apache-2.0 license. Report security pr
   their owner only
 - Audit log, automatic backups (attachments hard-linked, so incremental), restore, upgrade and offline-bundle
   scripts, an attachment storage limit and clean-up of unused files
+- Monitoring (Admin → Monitoring): requests, server errors and slow requests of the last 15 minutes, database
+  response, live connections, waiting webhooks and mail, storage, a warning when backups are overdue, and usage.
+  With `METRICS_TOKEN` set, Prometheus scrapes `/metrics`
+- AI agents (MCP): at `/api/mcp`, with a personal API token: search issues (TQL), read, create, update, move
+  between statuses, comment. The token owner's permissions apply as they are
+- Clicking an issue on the board or backlog opens it in a panel on the right (⌘/Ctrl-click opens a new tab);
+  issue links are found by key or title
 
-Not yet: Git and CI integration, versions and releases, charts, custom fields, automation rules, an MCP server,
-timelines, per-issue access restrictions.
+Not yet: Git and CI integration, versions and releases, charts, custom fields, automation rules, timelines, per-issue access restrictions.
 
 ### Performance (50,000 issues, `npx tsx scripts/perf.ts`)
 
@@ -171,6 +181,25 @@ network, so those paths aren't reached). When alpine ships fixes, rebuild with `
 The database is initialized with a UTF-8 locale (`en_US.UTF-8`). Under the `C` locale or PG17's builtin `C.UTF-8`,
 `pg_trgm` makes no Hangul trigrams and Korean search can't use the index (measured; fine on alpine and Debian with
 a UTF-8 libc locale). The app checks this at start and warns.
+
+### AI agents (MCP)
+
+Creating a token under My settings → API tokens also shows the command that adds Taskhouse to Claude Code:
+
+```sh
+claude mcp add --transport http taskhouse https://tasks.example.com/api/mcp --header "Authorization: Bearer th_…"
+```
+
+Tools: `list_projects`, `search_issues` (TQL), `get_issue`, `create_issue`, `update_issue`, `transition_issue`,
+`get_comments`, `add_comment`. Descriptions and comments go back and forth as Markdown. Every tool calls the REST
+API as the token's owner, so permissions, workflow rules and the change history are the same as on screen.
+
+### Monitoring
+
+Admin → Monitoring shows the state of the app (refreshed every 15 seconds). The overdue-backup warning needs the
+app container to see `./backups` read-only (the new docker-compose.yml has it). For Prometheus, put
+`METRICS_TOKEN` in `.env` and scrape `/metrics` with `Authorization: Bearer <token>`. The numbers are per instance
+and start from zero after a restart.
 
 ### Single sign-on (OIDC)
 

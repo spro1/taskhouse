@@ -12,8 +12,10 @@ services:
       DATABASE_URL: postgres://pagehouse:${POSTGRES_PASSWORD}@db:5432/pagehouse
       DATA_DIR: /data
       PORT: 3000
+      BACKUP_DIR: /backups # read-only, for Admin → Monitoring (last backup, overdue warning)
     volumes:
       - files:/data
+      - ./backups:/backups:ro
     ports:
       - "${BIND_ADDRESS:-0.0.0.0}:${PORT:-3000}:3000"
     networks: [shared]

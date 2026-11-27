@@ -46,7 +46,7 @@ export function registerProjects(app: Hono<Env>, db: Db) {
   app.get('/api/projects/:pkey', async (c) => {
     const p = await project(c)
     const [statuses, types, sprints, roles, transitions] = await Promise.all([
-      db.query('SELECT id, name, category FROM statuses WHERE project_id = $1 ORDER BY position', [p.id]),
+      db.query('SELECT id, name, category, on_board AS "onBoard" FROM statuses WHERE project_id = $1 ORDER BY position', [p.id]),
       db.query('SELECT id, name, level FROM issue_types WHERE project_id IS NULL OR project_id = $1 ORDER BY level, id', [p.id]),
       db.query(`SELECT id, name, goal, state, started_at AS "startedAt", ends_at AS "endsAt" FROM sprints WHERE project_id = $1 AND state <> 'closed' ORDER BY id`, [p.id]),
       db.query(`SELECT r.level, CASE WHEN u.id IS NULL THEN NULL ELSE jsonb_build_object('id', u.id, 'name', u.name) END AS "user",
@@ -101,6 +101,7 @@ export function registerProjects(app: Hono<Env>, db: Db) {
     const names = statuses.map((s) => String(s.name ?? '').trim())
     const ok = statuses.length >= 2 && statuses.length <= 30 && names.every((n) => n && n.length <= 50) && new Set(names).size === names.length
       && statuses.every((s) => [0, 1, 2].includes(s.category)) && statuses.some((s) => s.category === 0) && statuses.some((s) => s.category === 2)
+      && statuses.every((s) => s.onBoard === undefined || typeof s.onBoard === 'boolean') && statuses.some((s) => s.onBoard !== false)
       && transitions.length <= 200 && transitions.every((t) => names.includes(t.to) && (t.from == null || names.includes(t.from))
         && Object.entries(RULE_KINDS).every(([k, kinds]) => (t.rules?.[k] ?? []).every((r: any) => kinds.includes(r?.kind))))
     if (!ok) return fail(c, 400, 'bad_request')
@@ -115,8 +116,8 @@ export function registerProjects(app: Hono<Env>, db: Db) {
       const ids = new Map<string, number>()
       for (const [i, s] of statuses.entries()) {
         const r = s.id
-          ? (await q.query('UPDATE statuses SET name = $3, category = $4, position = $5 WHERE id = $1 AND project_id = $2 RETURNING id', [s.id, p.id, names[i], s.category, i])).rows[0]
-          : (await q.query('INSERT INTO statuses (project_id, name, category, position) VALUES ($1, $2, $3, $4) RETURNING id', [p.id, names[i], s.category, i])).rows[0]
+          ? (await q.query('UPDATE statuses SET name = $3, category = $4, position = $5, on_board = $6 WHERE id = $1 AND project_id = $2 RETURNING id', [s.id, p.id, names[i], s.category, i, s.onBoard !== false])).rows[0]
+          : (await q.query('INSERT INTO statuses (project_id, name, category, position, on_board) VALUES ($1, $2, $3, $4, $5) RETURNING id', [p.id, names[i], s.category, i, s.onBoard !== false])).rows[0]
         if (!r) throw new HttpError(400, 'bad_request')
         ids.set(names[i], r.id)
       }

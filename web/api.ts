@@ -11,7 +11,7 @@ export type Issue = {
 export type Sprint = { id: number; name: string; goal: string; state: 'planned' | 'active' | 'closed'; endsAt: string | null }
 export type Project = {
   id: number; key: string; name: string; visibility: 'edit' | 'view' | 'private'; role: string; level: number
-  statuses: Status[]; types: (Ref & { level: number })[]; sprints: Sprint[]
+  statuses: (Status & { onBoard: boolean })[]; types: (Ref & { level: number })[]; sprints: Sprint[]
   roles: { role: string; user: Ref | null; group: Ref | null }[]
 }
 

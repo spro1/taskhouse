@@ -1,13 +1,14 @@
 // Site admin: people (invite, disable, admin, reset link, temporary password), single sign-on and the audit log.
 import { useEffect, useState } from 'react'
 import { api, message } from './api.ts'
-import { toast, type Me } from './App.tsx'
+import { Link, toast, type Me } from './App.tsx'
+import { Monitor } from './Monitor.tsx'
 import { hasKey, t, type Key } from './i18n.ts'
 
 type Person = { id: number; email: string; name: string; isAdmin: boolean; sso: boolean; lastLoginAt: string | null; disabledAt: string | null }
 type Entry = { id: number; at: string; action: string; target: string | null; ip: string; ok: boolean; actor: string | null; detail: any }
 
-export function Admin({ me }: { me: Me }) {
+export function Admin({ me, tab }: { me: Me; tab: 'people' | 'monitor' | 'audit' }) {
   const [people, setPeople] = useState<Person[]>([])
   const [log, setLog] = useState<Entry[]>([])
   const [link, setLink] = useState<{ label: string; value: string } | null>(null)
@@ -25,6 +26,13 @@ export function Admin({ me }: { me: Me }) {
   return (
     <div className="settings">
       <h1>{t('nav.admin')}</h1>
+      <nav className="tabs">
+        <Link to="/admin" className={tab === 'people' ? 'on' : ''}>{t('admin.tab.people')}</Link>
+        <Link to="/admin/monitor" className={tab === 'monitor' ? 'on' : ''}>{t('admin.tab.monitor')}</Link>
+        <Link to="/admin/audit" className={tab === 'audit' ? 'on' : ''}>{t('admin.tab.audit')}</Link>
+      </nav>
+      {tab === 'monitor' && <Monitor />}
+      {tab === 'people' && <>
       <section>
         <h3>{t('admin.people')}</h3>
         {link && <p className="token">{link.label}: <code>{link.value}</code></p>}
@@ -59,7 +67,8 @@ export function Admin({ me }: { me: Me }) {
         <p className="muted small">{t('admin.disableNote')}</p>
       </section>
       <Sso />
-      <section>
+      </>}
+      {tab === 'audit' && <section>
         <h3>{t('audit.title')}</h3>
         <table className="results">
           <thead><tr><th>{t('audit.when')}</th><th>{t('audit.who')}</th><th>{t('audit.what')}</th><th>{t('audit.target')}</th><th>IP</th><th>{t('audit.result')}</th></tr></thead>
@@ -77,7 +86,7 @@ export function Admin({ me }: { me: Me }) {
           </tbody>
         </table>
         {log.length > 0 && log.length % 100 === 0 && <button onClick={() => loadLog(log.at(-1)!.id)}>{t('common.more')}</button>}
-      </section>
+      </section>}
     </div>
   )
 }

@@ -57,8 +57,9 @@ const mentionSuggestion = {
   },
 }
 
-export function Editor({ content, onSubmit, onCancel, submitLabel = t('common.save'), placeholder }: {
-  content?: any; onSubmit: (doc: any) => void; onCancel?: () => void; submitLabel?: string; placeholder?: string
+// `bare`: no buttons of its own, for a form that submits it (onChange keeps the form's copy current).
+export function Editor({ content, onSubmit, onCancel, onChange, bare, submitLabel = t('common.save'), placeholder }: {
+  content?: any; onSubmit: (doc: any) => void; onCancel?: () => void; onChange?: (doc: any) => void; bare?: boolean; submitLabel?: string; placeholder?: string
 }) {
   const editor = useEditor({
     extensions: [
@@ -67,6 +68,7 @@ export function Editor({ content, onSubmit, onCancel, submitLabel = t('common.sa
     ],
     content: content?.content?.length ? content : undefined,
     editorProps: { attributes: { class: 'editor', 'aria-label': placeholder ?? t('editor.content') } },
+    onUpdate: ({ editor }) => onChange?.(editor.getJSON()),
   })
   const submit = () => {
     if (!editor) return
@@ -85,11 +87,11 @@ export function Editor({ content, onSubmit, onCancel, submitLabel = t('common.sa
         </div>
       )}
       <EditorContent editor={editor} />
-      <div className="inline">
+      {!bare && <div className="inline">
         <button type="button" className="primary" onClick={submit}>{submitLabel}</button>
         {onCancel && <button type="button" onClick={onCancel}>{t('common.cancel')}</button>}
         <span className="muted small">{t('editor.hint', { action: submitLabel })}</span>
-      </div>
+      </div>}
     </div>
   )
 }
