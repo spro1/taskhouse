@@ -1,0 +1,34 @@
+name: Bug report
+description: Something doesn't work as it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations: { required: true }
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. Open a board\n2. …"
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The image tag, or `version` in `package.json`.
+    validations: { required: true }
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installed with
+      options: [install.sh (Podman/Docker), Offline bundle, From source]
+    validations: { required: true }
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "`podman compose logs app` (or `docker compose logs app`), browser console errors. Remove anything private first."
+      render: text

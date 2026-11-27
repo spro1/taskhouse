@@ -1,0 +1,7 @@
+# Every change needs a review from a maintainer. Paths listed later take precedence.
+*                       @spro1
+# Migrations, auth and permissions touch everyone's data: always a maintainer.
+/server/migrations/     @spro1
+/server/auth.ts         @spro1
+/server/access.ts       @spro1
+/.github/               @spro1
