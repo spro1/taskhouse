@@ -467,7 +467,7 @@ test('shared accounts: Taskhouse installed into a database where Pagehouse alrea
     assert.equal((await joined.query(`SELECT role FROM users WHERE email = 'new@x.test'`)).rows[0].role, 'member')
   } finally {
     await joined.end()
-    await db.query('DROP DATABASE taskhouse_join_test WITH (FORCE)')
+    await db.query('DROP DATABASE taskhouse_join_test') // not WITH (FORCE): it would kill connections the pool is still closing
   }
 })
 
