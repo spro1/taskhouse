@@ -26,13 +26,15 @@ function checkPassword(password: string, stored: string) {
 const validPassword = (p: unknown): p is string => typeof p === 'string' && p.length >= 8 && p.length <= 200
 const validEmail = (e: unknown): e is string => typeof e === 'string' && /^[^\s@]+@[^\s@]+$/.test(e) && e.length <= 200
 
+// Taskhouse and Pagehouse on two subdomains with shared accounts: the parent domain, so one sign-in covers both.
+const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN || undefined
 const secure = (c: Context) => (process.env.PUBLIC_URL ?? '').startsWith('https:') || c.req.header('x-forwarded-proto') === 'https'
 
 async function startSession(db: Db, c: Context, userId: number) {
   const token = b64url(randomBytes(32))
   await db.query(`INSERT INTO sessions (token_hash, user_id, expires_at) VALUES ($1, $2, now() + make_interval(hours => $3))`, [sha256(token), userId, SESSION_HOURS])
   await db.query('UPDATE users SET last_login_at = now() WHERE id = $1', [userId])
-  setCookie(c, 'sid', token, { httpOnly: true, sameSite: 'Lax', path: '/', secure: secure(c), maxAge: SESSION_HOURS * 3600 })
+  setCookie(c, 'sid', token, { httpOnly: true, sameSite: 'Lax', path: '/', secure: secure(c), maxAge: SESSION_HOURS * 3600, domain: COOKIE_DOMAIN })
 }
 
 // Guessing limits over a sliding 15 minutes: 10 failures per address and account, 50 per address (one machine trying
@@ -99,7 +101,7 @@ export function registerAuth(app: Hono<Env>, db: Db) {
   const one = async (sql: string, params: unknown[] = []) => (await db.query(sql, params)).rows[0]
 
   const storedSso = async (): Promise<SsoSettings | null> => {
-    const s = (await one(`SELECT value FROM settings WHERE key = 'sso'`))?.value as SsoSettings | undefined
+    const s = (await one(`SELECT value FROM accounts.settings WHERE key = 'sso'`))?.value as SsoSettings | undefined
     if (!s) return null
     // Saved before SECRET_KEY was set: encrypt it now.
     if (s.clientSecret && !isSealed(s.clientSecret) && encrypting()) await saveSso(s)
@@ -111,7 +113,7 @@ export function registerAuth(app: Hono<Env>, db: Db) {
       return { ...s, clientSecret: '' }
     }
   }
-  const saveSso = (s: SsoSettings) => db.query(`INSERT INTO settings (key, value) VALUES ('sso', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+  const saveSso = (s: SsoSettings) => db.query(`INSERT INTO accounts.settings (key, value) VALUES ('sso', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
     [JSON.stringify({ ...s, clientSecret: sealSecret(s.clientSecret) })])
   // shortcut: other app instances notice a change within 30 seconds; fine for a setting changed once in a while.
   let ssoCache: { at: number; cfg: Oidc | null } | null = null
@@ -189,7 +191,7 @@ export function registerAuth(app: Hono<Env>, db: Db) {
   app.post('/api/auth/logout', async (c) => {
     const token = getCookie(c, 'sid')
     if (token) await db.query('DELETE FROM sessions WHERE token_hash = $1', [sha256(token)])
-    deleteCookie(c, 'sid', { path: '/' })
+    deleteCookie(c, 'sid', { path: '/', domain: COOKIE_DOMAIN })
     const idToken = getCookie(c, 'oidc_idt')
     deleteCookie(c, 'oidc_idt', { path: '/api/auth' })
     const cfg = await oidc()
@@ -332,14 +334,19 @@ export function registerAuth(app: Hono<Env>, db: Db) {
           if (!u) return 'email_taken'
         }
         if (u.disabled_at) return 'account_disabled'
+        await q.query('UPDATE users SET last_sso_at = now() WHERE id = $1', [u.id]) // Pagehouse reads it for its tokens when accounts are shared
         if (groups) {
-          await q.query(`DELETE FROM group_members gm USING groups g WHERE gm.group_id = g.id AND g.source = 'oidc' AND gm.user_id = $1`, [u.id])
+          // Same rule as Pagehouse (they may share these tables): sign-in only touches the memberships it made itself.
+          await q.query(`DELETE FROM group_members WHERE user_id = $1 AND source = 'oidc'`, [u.id])
           if (groups.length) {
-            await q.query(`INSERT INTO groups (name, source) SELECT unnest($1::text[]), 'oidc' ON CONFLICT (name) DO NOTHING`, [groups])
-            await q.query(`INSERT INTO group_members (group_id, user_id) SELECT id, $2 FROM groups WHERE name = ANY($1) ON CONFLICT DO NOTHING`, [groups, u.id])
+            await q.query(`INSERT INTO groups (name) SELECT unnest($1::text[]) ON CONFLICT (name) DO NOTHING`, [groups])
+            await q.query(`INSERT INTO group_members (group_id, user_id, source) SELECT id, $2, 'oidc' FROM groups WHERE name = ANY($1) ON CONFLICT DO NOTHING`, [groups, u.id])
           }
           // The admin group grants admin; it never takes it from an admin with a password (the break-glass account).
           if (cfg.adminGroup) await q.query(`UPDATE users SET is_admin = $2 OR (is_admin AND password_hash <> '') WHERE id = $1`, [u.id, groups.includes(cfg.adminGroup)])
+          // Accounts shared with Pagehouse: this one SSO sign-in covers both products, so the admin group sets its role too.
+          if (cfg.adminGroup && (await q.query(`SELECT 1 FROM information_schema.columns WHERE table_schema = 'accounts' AND table_name = 'users' AND column_name = 'role'`)).rowCount)
+            await q.query(`UPDATE users SET role = CASE WHEN $2 THEN 'admin' WHEN role = 'admin' AND password_hash = '' THEN 'member' ELSE role END WHERE id = $1`, [u.id, groups.includes(cfg.adminGroup)])
         }
         return u.id as number
       })
@@ -355,6 +362,7 @@ export function registerAuth(app: Hono<Env>, db: Db) {
     }
   })
 
+  let hasAdmin = false
   // Everything below needs a signed-in user: session cookie or personal API token.
   app.use('/api/*', async (c, next) => {
     if (c.req.path.startsWith('/api/auth/')) return next()
@@ -373,6 +381,13 @@ export function registerAuth(app: Hono<Env>, db: Db) {
           )
         : undefined
     if (!user) return fail(c, 401, 'login_required')
+    // Accounts shared with Pagehouse: Taskhouse added later has no admin of its own, so a Pagehouse admin becomes one.
+    if (!hasAdmin) {
+      if (!user.isAdmin && (await one(
+        `UPDATE users u SET is_admin = true WHERE u.id = $1 AND to_jsonb(u)->>'role' = 'admin'
+           AND NOT EXISTS (SELECT 1 FROM users WHERE is_admin AND disabled_at IS NULL) RETURNING 1 AS x`, [user.id]))) user.isAdmin = true
+      hasAdmin = !!(await one(`SELECT 1 AS x FROM users WHERE is_admin AND disabled_at IS NULL`))
+    }
     c.set('user', user)
     if (c.req.path.startsWith('/api/admin/') && !user.isAdmin) return fail(c, 403, 'admin_only')
     return next()
@@ -380,7 +395,8 @@ export function registerAuth(app: Hono<Env>, db: Db) {
 
   app.get('/api/me', async (c) =>
     c.json({ ...c.get('user'), ...(await one(`SELECT email_notify AS "emailNotify", password_hash <> '' AS "hasPassword",
-      must_change_password AS "mustChangePassword", locale FROM users WHERE id = $1`, [c.get('user').id])), mail: !!mailer() }))
+      must_change_password AS "mustChangePassword", locale,
+      (SELECT value #>> '{}' FROM accounts.settings WHERE key = 'url:pagehouse') AS "pagehouseUrl" FROM users WHERE id = $1`, [c.get('user').id])), mail: !!mailer() }))
   app.patch('/api/me', async (c) => {
     const b = await body(c)
     const notify = typeof b.emailNotify === 'boolean' ? b.emailNotify : null
@@ -497,13 +513,11 @@ export function registerAuth(app: Hono<Env>, db: Db) {
     const members = Array.isArray(b.members) ? b.members.map(Number).filter(Number.isInteger) : null
     if (!name || !members) return fail(c, 400, 'bad_request')
     const r = await tx(db, async (q) => {
-      const g = (await q.query(`INSERT INTO groups (name) VALUES ($1) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id, source`, [name])).rows[0]
-      if (g.source !== 'local') return null
+      const g = (await q.query(`INSERT INTO groups (name) VALUES ($1) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id`, [name])).rows[0]
       await q.query('DELETE FROM group_members WHERE group_id = $1', [g.id])
       await q.query('INSERT INTO group_members (group_id, user_id) SELECT $1, id FROM users WHERE id = ANY($2)', [g.id, members])
       return g
     })
-    if (!r) return fail(c, 409, 'group_from_sso')
     await audit(db, c, 'group.update', name, true, { members })
     return c.json({ id: r.id })
   })
