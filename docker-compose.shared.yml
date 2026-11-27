@@ -1,0 +1,51 @@
+# Taskhouse added to a Pagehouse install on the same machine. It uses Pagehouse's database (no db service here),
+# so the two share accounts. `scripts/install.sh --share-with <pagehouse folder>` writes the .env that selects this
+# file (COMPOSE_FILE) and fills in SHARED_NETWORK. Keep the app and backup services in step with docker-compose.yml.
+services:
+  app:
+    build: .
+    image: ${TASKHOUSE_IMAGE:-localhost/taskhouse}:${TASKHOUSE_VERSION:-latest}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # POSTGRES_PASSWORD here is Pagehouse's; `db` is its database on its network
+      DATABASE_URL: postgres://pagehouse:${POSTGRES_PASSWORD}@db:5432/pagehouse
+      DATA_DIR: /data
+      PORT: 3000
+      BACKUP_DIR: /backups # read-only, for Admin → Monitoring (last backup, overdue warning)
+    volumes:
+      - files:/data
+      - ./backups:/backups:ro
+    ports:
+      - "${BIND_ADDRESS:-0.0.0.0}:${PORT:-3000}:3000"
+    networks: [shared]
+    stop_grace_period: 15s
+
+  # Backs up the shared database (both products are in it) and Taskhouse's attachments.
+  backup:
+    build: docker/postgres
+    image: ${TASKHOUSE_POSTGRES_IMAGE:-localhost/taskhouse-postgres}:17
+    user: root
+    restart: unless-stopped
+    environment:
+      PGHOST: db
+      PGUSER: pagehouse
+      PGDATABASE: pagehouse
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      INTERVAL: ${BACKUP_INTERVAL_HOURS:-24}
+      KEEP: ${BACKUP_KEEP:-14}
+    volumes:
+      - files:/data
+      - ./backups:/backups
+      - ./docker/backup.sh:/backup.sh:ro
+    entrypoint: ["sh", "/backup.sh"]
+    command: ["loop"]
+    networks: [shared]
+
+networks:
+  shared:
+    name: ${SHARED_NETWORK:?set by scripts/install.sh --share-with}
+    external: true
+
+volumes:
+  files:

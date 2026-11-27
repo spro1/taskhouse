@@ -43,6 +43,18 @@ case "${1:-}" in
     src="${2:?backup name}"
     case "$src" in */*|.*) echo "bad backup name" >&2; exit 1 ;; esac
     [ -f "$src/db.dump" ] || { echo "no such backup: $src" >&2; exit 1; }
+    # Empty the database first. pg_restore --clean only drops what the dump names, and the table layout changed in
+    # 0.2 (accounts in their own schema): an older backup would leave the newer account tables beside its own, and
+    # the app then refuses to start.
+    toc=$(pg_restore -l "$src/db.dump")
+    if [ -n "$(psql -Atc "SELECT coalesce(to_regclass('pagehouse.pages'), to_regclass('public.pages'))")" ] &&
+       ! echo "$toc" | grep -Eq ' TABLE (public|pagehouse) pages '; then
+      echo "Pagehouse shares this database and is not in backup $src: restoring it would delete Pagehouse's accounts. Nothing was changed." >&2
+      exit 3
+    fi
+    { echo 'SET client_min_messages = warning; DROP SCHEMA IF EXISTS accounts, taskhouse CASCADE;'
+      psql -Atc "SELECT format('DROP TABLE IF EXISTS public.%I CASCADE;', tablename) FROM pg_tables WHERE schemaname = 'public'"
+    } | psql -q -v ON_ERROR_STOP=1 -1
     pg_restore --clean --if-exists --no-owner -d "$PGDATABASE" "$src/db.dump"
     mkdir -p /data/files
     find /data/files -type f -delete

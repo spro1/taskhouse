@@ -11,7 +11,7 @@ import { MySettings, Settings } from './Settings.tsx'
 import { Search } from './Search.tsx'
 import { Admin } from './Admin.tsx'
 
-export type Me = { id: number; name: string; email: string; isAdmin: boolean; locale: Lang | null; theme: Theme | null; mustChangePassword: boolean }
+export type Me = { id: number; name: string; email: string; isAdmin: boolean; locale: Lang | null; theme: Theme | null; mustChangePassword: boolean; pagehouseUrl: string | null }
 
 export const nav = (to: string) => {
   history.pushState(null, '', to)
@@ -264,6 +264,8 @@ function Sidebar(p: { me: Me; path: string; tab: string; projects: Project[]; cu
       </button>
       <Link to="/" className={`nav-item ${p.path === '/' ? 'on' : ''}`}><Icon name="home" /> {t('nav.home')}</Link>
       <Link to="/search" className={`nav-item ${p.path === '/search' ? 'on' : ''}`}><Icon name="filter" /> {t('nav.search')}</Link>
+      {/* set when Pagehouse shares this install's accounts */}
+      {p.me.pagehouseUrl && <a href={p.me.pagehouseUrl} className="nav-item"><Icon name="link" /> Pagehouse</a>}
 
       <div className="tree-head">
         <span>{t('home.projects')}</span>

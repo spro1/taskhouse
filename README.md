@@ -6,6 +6,7 @@ Apache-2.0 라이선스의 오픈소스입니다. 보안 문제는 [SECURITY.md]
 ## 지금 들어 있는 것 (0·1단계 + TQL)
 
 - 첫 실행 설정 토큰(서버 로그에 출력), 초대 링크 계정, 비밀번호 로그인, OIDC SSO(PKCE, nonce, 그룹 동기화, 관리자 그룹; 관리 화면 또는 환경변수로 설정)
+- Pagehouse(위키)와 계정 공유: 같은 데이터베이스를 쓰면 사용자·로그인·그룹·SSO 설정을 함께 쓰고 상단 메뉴로 오갑니다. 역할과 권한은 제품마다 따로(아래 "Pagehouse와 함께 쓰기")
 - 로그인 시도 제한: 15분 동안 같은 주소·계정 10회, 같은 주소 50회, 같은 계정 30회(넘으면 429와 `Retry-After`)
 - 비밀번호 찾기(메일 설정 시 1시간짜리 링크), 관리자가 발급하는 재설정 링크와 임시 비밀번호(다음 로그인 때 변경 강제)
 - 한국어·영어 화면과 메일(계정마다 선택, 기본 한국어)
@@ -62,6 +63,46 @@ scripts/upgrade.sh               # preupgrade-… 백업 → 새 이미지 → �
 - SSO로 새 계정을 만들 때도 IdP가 확인한 이메일이 필요합니다(Pagehouse와 같은 기준). `email_verified`를 보내지 않는 IdP를 쓰면 업그레이드 뒤 새 사용자가 SSO로 들어오지 못합니다(`no_email`).
   그런 IdP라면 `.env`에 `OIDC_TRUST_EMAIL=1`을 넣거나 관리 → SSO에서 "확인 표시를 하지 않은 이메일도 믿기"를 켜세요. 이미 계정이 있는 사람은 영향이 없습니다.
 - `TRUST_PROXY`는 앞단 프록시 수입니다. 기존 `1`은 그대로 "프록시 1단"입니다. 이제 `X-Forwarded-For`의 오른쪽에서부터 세므로 클라이언트가 이 헤더를 꾸며도 로그인 제한을 피할 수 없습니다.
+- 계정 테이블(`users`, `sessions`, `groups`, `group_members`)이 처음 시작할 때 데이터와 함께 `accounts` 스키마로 옮겨지고, SSO 설정은 `accounts.settings`로 옮겨집니다. 사용할 때 달라지는 것은 없습니다. DB 계정에 데이터베이스의 `CREATE` 권한이 있어야 합니다(기본 설치와 데이터베이스 소유자에게는 이미 있음). 직접 실행하는 SQL에는 스키마를 붙여야 하고(`accounts.users`), 이전 버전은 새 구조를 읽지 못하므로 되돌리려면 `preupgrade-…` 백업을 복원하세요.
+- SSO에서 온 그룹도 이제 관리 화면에서 구성원을 고칠 수 있습니다. SSO 로그인은 자기가 넣은 구성원만 넣고 빼며, 직접 넣은 구성원은 건드리지 않습니다(Pagehouse와 같은 규칙).
+
+### Pagehouse와 함께 쓰기
+
+Taskhouse와 [Pagehouse](https://github.com/spro1/pagehouse)(위키)는 별도 제품이지만, 한 제품군의 두 제품처럼 계정을 함께 쓸 수 있습니다. 두 제품이 **같은 PostgreSQL 데이터베이스**(같은 `DATABASE_URL`)를 쓰면 계정을 공유합니다.
+각 제품의 테이블은 자기 스키마(`taskhouse`, `pagehouse`)에 있고, 사용자·비밀번호·로그인·그룹·SSO 설정은 `accounts` 스키마에 한 벌만 있습니다.
+
+| 함께 쓰는 것 | 제품마다 따로인 것 |
+|---|---|
+| 계정 (이름, 이메일, 비밀번호, 비활성화 여부) | 누가 관리자인지, 프로젝트 역할 등 모든 권한 |
+| 로그인: 한쪽에서 로그인·로그아웃하면 다른 쪽도 같습니다 | API 토큰 |
+| 그룹과 구성원 | 이슈, 페이지, 첨부, 웹훅, 감사 로그, 그 밖의 모든 설정 |
+| SSO 설정 (어느 제품의 관리 → SSO에서든) | |
+
+- **함께 설치하기 (서버 한 대)**: 둘 중 하나를 평소처럼 설치한 뒤, 다른 제품을 설치할 때 `--share-with`에 먼저 설치한 제품의 폴더를 지정합니다. 어느 쪽이 먼저여도 되고, 새 서버에 둘 다 설치할 때도 같습니다.
+  ```sh
+  # Pagehouse가 /opt/pagehouse에 설치되어 있을 때 Taskhouse 추가 (이 폴더에서 실행)
+  scripts/install.sh --share-with /opt/pagehouse            # 포트 3000, Pagehouse가 3000이면 3001
+  PORT=8081 scripts/install.sh --share-with /opt/pagehouse  # 포트를 직접 지정
+
+  # Taskhouse가 /opt/taskhouse에 설치되어 있을 때 Pagehouse 추가
+  curl -fsSL https://github.com/spro1/pagehouse/releases/latest/download/install.sh | sh -s -- --share-with /opt/taskhouse --port 3001
+  ```
+  추가하는 제품은 자기 데이터베이스를 띄우지 않고, 먼저 설치한 제품의 compose 네트워크에 붙어 그 데이터베이스를 씁니다(`docker-compose.shared.yml`). DB 비밀번호와 `SECRET_KEY`는 설치 스크립트가 그 설치의 `.env`에서 옮겨 적습니다.
+  먼저 설치한 제품은 계속 실행되며 계정, 비밀번호, 그룹, 로그인 상태, 내용이 그대로입니다. 계정이 이미 있으므로 추가한 제품에는 초기 설정과 설정 토큰이 없고, 기존 계정으로 바로 로그인합니다.
+  처음에는 그 제품의 관리자가 없고, 다른 제품의 관리자가 처음 들어오면 관리자가 됩니다. 설치 뒤 두 제품의 `.env`에 `PUBLIC_URL`을 넣고 각 폴더에서 `compose up -d`로 반영하면 상단 메뉴에 상대 제품 링크가 나옵니다.
+- **함께 운영할 때**: 추가한 제품은 먼저 설치한 제품이 실행 중이어야 동작합니다(데이터베이스가 그쪽에 있음). 각 제품의 백업에는 공유 데이터베이스 전체(두 제품 모두)와 그 제품의 첨부 파일이 들어가고, 한쪽을 복원하면 계정과 두 제품이 모두 그 시점으로 돌아갑니다.
+  `scripts/restore.sh` 전에 다른 제품을 멈추고(그 폴더에서 `compose stop app`) 끝난 뒤 다시 시작하세요. 두 번째 제품을 추가하기 전에 만든 백업은 복원을 거부하고 아무것도 바꾸지 않습니다.
+- **추가한 제품을 다시 없애기**: 그 폴더에서 `compose down -v`를 실행한 뒤 공유 데이터베이스에서 그 제품의 테이블과 메뉴 링크를 지웁니다. Taskhouse를 추가했던 경우 Pagehouse 폴더에서
+  `docker compose exec db psql -U pagehouse -c "DROP SCHEMA taskhouse CASCADE" -c "DELETE FROM accounts.settings WHERE key = 'url:taskhouse'"`, Pagehouse를 추가했던 경우 이 폴더에서
+  `docker compose exec db psql -U taskhouse -c "DROP SCHEMA pagehouse CASCADE" -c "DELETE FROM accounts.settings WHERE key = 'url:pagehouse'"`. 계정은 남습니다.
+- **관련 설정**(`SECRET_KEY`는 설치 스크립트가 맞춰 줌): 같은 값의 `SECRET_KEY`(SSO 클라이언트 비밀을 양쪽이 읽어야 함), `PUBLIC_URL`(상단 메뉴에 상대 제품 링크가 나옴),
+  서브도메인이 서로 다르면 `COOKIE_DOMAIN`에 상위 도메인(`tasks.example.com`과 `wiki.example.com`이면 `example.com`). 같은 호스트 이름이면 `COOKIE_DOMAIN`은 비워 둡니다. 로그인 쿠키가 그 도메인 아래 모든 사이트로 전송되므로, 그 사이트가 모두 직접 운영하는 것일 때만 쓰세요.
+- **SSO**: IdP의 클라이언트 하나에 두 제품의 콜백 주소를 모두 등록합니다. 설정을 바꾸면 다른 제품에는 30초 안에 반영됩니다. `OIDC_ADMIN_GROUP`을 지정했다면 SSO로 로그인할 때마다 두 제품의 관리자 여부가 그 그룹에 따라 정해집니다.
+- 한 제품에서 만든 계정은 다른 제품에서 일반 구성원입니다. 계정을 비활성화하면 양쪽 모두 막힙니다. Pagehouse에서 그룹을 삭제하면 그 그룹에 준 프로젝트 역할도 없어집니다.
+- **이미 계정이 있는 두 설치**는 같은 데이터베이스로 지정해 합칠 수 없습니다. 두 번째 제품이 시작을 거부하고 아무것도 바꾸지 않습니다. 기존 계정 합치기는 아직 지원하지 않습니다.
+- 서버가 서로 다르거나 직접 운영하는 PostgreSQL을 쓸 때는 설치 옵션이 없습니다. 두 제품에 같은 `DATABASE_URL`과 같은 `SECRET_KEY`를 주고, 그 데이터베이스는 직접 백업하세요. 덤프 하나에 두 제품이 모두 들어 있습니다.
+- 두 제품을 따로 쓰려면 기본 설치처럼 데이터베이스를 따로 주면 됩니다. 그러면 아무것도 공유하지 않습니다.
+- 계정 테이블을 바꾸는 마이그레이션은 `ADD COLUMN IF NOT EXISTS`로 쓰고 기본값을 주며, Pagehouse에도 같은 변경을 넣습니다(`server/app.test.ts`의 `PAGEHOUSE_ACCOUNTS`가 상대 쪽 구조의 사본).
 
 ### 이미지와 취약점
 
@@ -102,6 +143,8 @@ claude mcp add --transport http taskhouse https://tasks.example.com/api/mcp --he
 계정은 IdP의 `sub`로 찾습니다. 처음 로그인하면 같은 이메일의 기존 로컬 계정에 연결하거나 새 계정을 만드는데(`OIDC_AUTO_CREATE=0`이면 만들지 않음),
 둘 다 IdP가 확인한 이메일(`email_verified`)일 때만 합니다. `email_verified`를 보내지 않는 IdP라면 `OIDC_TRUST_EMAIL=1`로 허용할 수 있습니다(IdP가 `false`라고 하면 여전히 거부).
 이미 `sub`로 연결된 사람은 이메일 확인 여부와 상관없이 로그인합니다.
+Pagehouse와 계정을 공유하면 SSO 설정도 하나입니다. IdP의 클라이언트 하나에 두 제품의 리다이렉트 URI와 로그아웃 후 이동 주소를 모두 등록하고, 두 제품의 `SECRET_KEY`를 같게 둡니다.
+어느 제품에서든 SSO로 한 번 로그인하면 양쪽에 로그인되고, `OIDC_ADMIN_GROUP`은 두 제품의 관리자 여부를 함께 정합니다. `.env`의 `OIDC_*`는 제품마다 따로이므로 양쪽에 모두 넣거나 모두 비워 두세요.
 `PASSWORD_LOGIN=0`(SSO 전용)이어도 비밀번호가 있는 관리자는 로그인 화면의 "관리자 비상 로그인"으로 들어올 수 있습니다.
 
 Keycloak 26으로 확인했습니다. 로컬에서 직접 해 보려면 `scripts/keycloak-dev.sh`가 테스트용 Keycloak(realm·client·그룹 매퍼·테스트 사용자)을 띄웁니다.

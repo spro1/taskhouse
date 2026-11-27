@@ -8,6 +8,7 @@ name="${1:?usage: scripts/restore.sh <backup folder name in ./backups>}"
 [ -f "backups/$name/db.dump" ] || { echo "No backup named $name in ./backups" >&2; exit 1; }
 compose exec -T backup sh /backup.sh once prerestore
 compose stop app
-compose exec -T backup sh /backup.sh restore "$name"
+# 3 = refused before changing anything: the app can run again as it was
+compose exec -T backup sh /backup.sh restore "$name" || { [ $? -eq 3 ] && compose start app; exit 1; }
 compose start app
 echo "Restored $name."
