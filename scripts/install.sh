@@ -5,7 +5,7 @@
 #   scripts/install.sh images.tar   load images from an offline bundle first (no internet needed)
 #   scripts/install.sh --share-with /path/to/pagehouse [images.tar]
 #                                   add Taskhouse to a running Pagehouse install on this machine: it uses
-#                                   Pagehouse's database, so both share accounts (README, "Pagehouse와 함께 쓰기")
+#                                   Pagehouse's database, so both share accounts (docs/install.md, "Using Taskhouse together with Pagehouse")
 #                                   (web port: 3000, or 3001 when Pagehouse has 3000; PORT=N in front chooses one)
 set -eu
 share=

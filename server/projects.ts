@@ -137,8 +137,8 @@ export function registerProjects(app: Hono<Env>, db: Db) {
   app.post('/api/projects/:pkey/sprints', async (c) => {
     const p = await project(c, LEVEL.member)
     const b = await body(c)
-    const n = (await db.query('SELECT count(*)::int AS n FROM sprints WHERE project_id = $1', [p.id])).rows[0].n
-    const name = String(b.name ?? '').trim().slice(0, 100) || `${p.key} 스프린트 ${n + 1}`
+    const { n, locale } = (await db.query('SELECT count(*)::int AS n, (SELECT locale FROM users WHERE id = $2) AS locale FROM sprints WHERE project_id = $1', [p.id, user(c).id])).rows[0]
+    const name = String(b.name ?? '').trim().slice(0, 100) || `${p.key} ${locale === 'en' ? 'Sprint' : '스프린트'} ${n + 1}`
     return c.json((await db.query('INSERT INTO sprints (project_id, name, goal) VALUES ($1, $2, $3) RETURNING id, name, goal, state', [p.id, name, String(b.goal ?? '').slice(0, 500)])).rows[0], 201)
   })
   app.patch('/api/projects/:pkey/sprints/:id', async (c) => {

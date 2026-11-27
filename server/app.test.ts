@@ -237,6 +237,9 @@ test('rank, search, Korean text, sprints', async () => {
   assert.equal(closed.moved, 1)
   assert.equal((await bob.json('GET', '/api/issues/DEMO-2')).sprint, null)
   assert.equal((await bob.json('GET', '/api/issues/DEMO-1')).sprint.id, sprint.id) // done work stays in its sprint
+  await bob.call('PATCH', '/api/me', { locale: 'en' })
+  assert.equal((await bob.json('POST', '/api/projects/DEMO/sprints', {})).name, 'DEMO Sprint 2') // default name in the creator's language
+  await bob.call('PATCH', '/api/me', { locale: 'ko' })
 })
 
 test('comments notify watchers who can see the project, never the actor', async () => {
