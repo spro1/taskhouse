@@ -74,16 +74,29 @@ Taskhouse와 [Pagehouse](https://github.com/spro1/pagehouse)(위키)는 별도 �
 | 그룹과 구성원 | 이슈, 페이지, 첨부, 웹훅, 감사 로그, 그 밖의 모든 설정 |
 | SSO 설정 (어느 제품의 관리 → SSO에서든) | |
 
-- **두 번째 제품 추가하기**: 첫 번째 제품이 쓰는 데이터베이스의 `DATABASE_URL`로 설치하고 시작합니다. 계정이 이미 있으므로 초기 설정과 설정 토큰이 없습니다.
-  처음에는 그 제품의 관리자가 없고, 다른 제품의 관리자가 처음 들어오면 관리자가 됩니다. 어느 쪽을 먼저 설치했는지, 빈 데이터베이스에 둘을 동시에 시작했는지는 상관없습니다.
-- **양쪽에 설정할 것**: 같은 값의 `SECRET_KEY`(SSO 클라이언트 비밀을 양쪽이 읽어야 함), `PUBLIC_URL`(상단 메뉴에 상대 제품 링크가 나옴),
+- **함께 설치하기 (서버 한 대)**: 둘 중 하나를 평소처럼 설치한 뒤, 다른 제품을 설치할 때 `--share-with`에 먼저 설치한 제품의 폴더를 지정합니다. 어느 쪽이 먼저여도 되고, 새 서버에 둘 다 설치할 때도 같습니다.
+  ```sh
+  # Pagehouse가 /opt/pagehouse에 설치되어 있을 때 Taskhouse 추가 (이 폴더에서 실행)
+  scripts/install.sh --share-with /opt/pagehouse            # 포트 3000, Pagehouse가 3000이면 3001
+  PORT=8081 scripts/install.sh --share-with /opt/pagehouse  # 포트를 직접 지정
+
+  # Taskhouse가 /opt/taskhouse에 설치되어 있을 때 Pagehouse 추가
+  curl -fsSL https://github.com/spro1/pagehouse/releases/latest/download/install.sh | sh -s -- --share-with /opt/taskhouse --port 3001
+  ```
+  추가하는 제품은 자기 데이터베이스를 띄우지 않고, 먼저 설치한 제품의 compose 네트워크에 붙어 그 데이터베이스를 씁니다(`docker-compose.shared.yml`). DB 비밀번호와 `SECRET_KEY`는 설치 스크립트가 그 설치의 `.env`에서 옮겨 적습니다.
+  먼저 설치한 제품은 계속 실행되며 계정, 비밀번호, 그룹, 로그인 상태, 내용이 그대로입니다. 계정이 이미 있으므로 추가한 제품에는 초기 설정과 설정 토큰이 없고, 기존 계정으로 바로 로그인합니다.
+  처음에는 그 제품의 관리자가 없고, 다른 제품의 관리자가 처음 들어오면 관리자가 됩니다. 설치 뒤 두 제품의 `.env`에 `PUBLIC_URL`을 넣고 각 폴더에서 `compose up -d`로 반영하면 상단 메뉴에 상대 제품 링크가 나옵니다.
+- **함께 운영할 때**: 추가한 제품은 먼저 설치한 제품이 실행 중이어야 동작합니다(데이터베이스가 그쪽에 있음). 각 제품의 백업에는 공유 데이터베이스 전체(두 제품 모두)와 그 제품의 첨부 파일이 들어가고, 한쪽을 복원하면 계정과 두 제품이 모두 그 시점으로 돌아갑니다.
+  `scripts/restore.sh` 전에 다른 제품을 멈추고(그 폴더에서 `compose stop app`) 끝난 뒤 다시 시작하세요. 두 번째 제품을 추가하기 전에 만든 백업은 복원을 거부하고 아무것도 바꾸지 않습니다.
+- **추가한 제품을 다시 없애기**: 그 폴더에서 `compose down -v`를 실행한 뒤 공유 데이터베이스에서 그 제품의 테이블과 메뉴 링크를 지웁니다. Taskhouse를 추가했던 경우 Pagehouse 폴더에서
+  `docker compose exec db psql -U pagehouse -c "DROP SCHEMA taskhouse CASCADE" -c "DELETE FROM accounts.settings WHERE key = 'url:taskhouse'"`, Pagehouse를 추가했던 경우 이 폴더에서
+  `docker compose exec db psql -U taskhouse -c "DROP SCHEMA pagehouse CASCADE" -c "DELETE FROM accounts.settings WHERE key = 'url:pagehouse'"`. 계정은 남습니다.
+- **관련 설정**(`SECRET_KEY`는 설치 스크립트가 맞춰 줌): 같은 값의 `SECRET_KEY`(SSO 클라이언트 비밀을 양쪽이 읽어야 함), `PUBLIC_URL`(상단 메뉴에 상대 제품 링크가 나옴),
   서브도메인이 서로 다르면 `COOKIE_DOMAIN`에 상위 도메인(`tasks.example.com`과 `wiki.example.com`이면 `example.com`). 같은 호스트 이름이면 `COOKIE_DOMAIN`은 비워 둡니다. 로그인 쿠키가 그 도메인 아래 모든 사이트로 전송되므로, 그 사이트가 모두 직접 운영하는 것일 때만 쓰세요.
 - **SSO**: IdP의 클라이언트 하나에 두 제품의 콜백 주소를 모두 등록합니다. 설정을 바꾸면 다른 제품에는 30초 안에 반영됩니다. `OIDC_ADMIN_GROUP`을 지정했다면 SSO로 로그인할 때마다 두 제품의 관리자 여부가 그 그룹에 따라 정해집니다.
 - 한 제품에서 만든 계정은 다른 제품에서 일반 구성원입니다. 계정을 비활성화하면 양쪽 모두 막힙니다. Pagehouse에서 그룹을 삭제하면 그 그룹에 준 프로젝트 역할도 없어집니다.
 - **이미 계정이 있는 두 설치**는 같은 데이터베이스로 지정해 합칠 수 없습니다. 두 번째 제품이 시작을 거부하고 아무것도 바꾸지 않습니다. 기존 계정 합치기는 아직 지원하지 않습니다.
-- 기본 `docker-compose.yml`은 제품마다 데이터베이스를 따로 만듭니다. 그래서 지금은 두 제품이 모두 접속할 수 있는 PostgreSQL이 있어야 공유할 수 있습니다.
-  이때 데이터베이스 덤프 하나에 두 제품이 모두 들어 있고, 복원하면 두 제품이 함께 그 시점으로 돌아갑니다. 첨부 파일은 각 제품이 따로 백업합니다.
-  Pagehouse가 들어 있지 않은 백업(공유하기 전에 만든 것)은 공유 중인 데이터베이스에 복원되지 않습니다. `scripts/restore.sh`가 거부하고 아무것도 바꾸지 않습니다.
+- 서버가 서로 다르거나 직접 운영하는 PostgreSQL을 쓸 때는 설치 옵션이 없습니다. 두 제품에 같은 `DATABASE_URL`과 같은 `SECRET_KEY`를 주고, 그 데이터베이스는 직접 백업하세요. 덤프 하나에 두 제품이 모두 들어 있습니다.
 - 두 제품을 따로 쓰려면 기본 설치처럼 데이터베이스를 따로 주면 됩니다. 그러면 아무것도 공유하지 않습니다.
 - 계정 테이블을 바꾸는 마이그레이션은 `ADD COLUMN IF NOT EXISTS`로 쓰고 기본값을 주며, Pagehouse에도 같은 변경을 넣습니다(`server/app.test.ts`의 `PAGEHOUSE_ACCOUNTS`가 상대 쪽 구조의 사본).
 
