@@ -1,0 +1,18 @@
+# Weekly update pull requests, so newly published vulnerabilities get fixed without anyone watching for them.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      tiptap: { patterns: ["@tiptap/*"] }
+      minor-and-patch: { update-types: [minor, patch] }
+  - package-ecosystem: docker
+    directory: /
+    schedule: { interval: weekly }
+  - package-ecosystem: docker
+    directory: /docker/postgres
+    schedule: { interval: weekly }
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
