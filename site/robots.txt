@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://spro1.github.io/taskhouse/sitemap.xml

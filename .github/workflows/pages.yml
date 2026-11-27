@@ -1,0 +1,46 @@
+# Publishes the product page in site/ to GitHub Pages (the same page setup as Pagehouse).
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths: ["site/**", "docs/images/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read   # deploy-pages reads the uploaded artifact's metadata
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  # Upload and deploy are separate jobs, as in GitHub's own Pages workflow: in one job, deploy-pages looked the
+  # artifact up right after the upload and often didn't find it yet.
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Assemble
+        run: |
+          mkdir -p _site/images
+          cp site/*.html site/*.css site/*.js site/robots.txt site/sitemap.xml _site/
+          cp docs/images/* _site/images/
+          # New CSS/JS at once after a deploy, instead of whatever the browser cached (Pages caches 10 minutes).
+          sed -i "s/__V__/${GITHUB_SHA::8}/g" _site/*.html
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
