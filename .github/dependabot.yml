@@ -7,12 +7,21 @@ updates:
     groups:
       tiptap: { patterns: ["@tiptap/*"] }
       minor-and-patch: { update-types: [minor, patch] }
+    # Its version is the PostgreSQL version the tests run on: keep it the same major as docker/postgres.
+    ignore:
+      - dependency-name: embedded-postgres
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: docker
     directory: /
     schedule: { interval: weekly }
   - package-ecosystem: docker
     directory: /docker/postgres
     schedule: { interval: weekly }
+    # A new PostgreSQL major cannot open the data of the old one, and Pagehouse and Taskhouse can share one database.
+    # Raise it by hand, in both products together, with a dump and restore step.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
