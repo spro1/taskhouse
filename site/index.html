@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Taskhouse · The issue tracker you install on your own server</title>
+<meta name="description" content="Taskhouse is an open-source, self-hosted issue tracker and Jira alternative for small organizations and teams: backlog, sprints and boards, SSO, MCP for AI agents and air-gapped installs.">
+<meta property="og:title" content="Taskhouse · The issue tracker you install on your own server">
+<meta property="og:description" content="An open-source issue tracker that keeps your work inside your network. One server, one command.">
+<link rel="icon" href="images/logo.svg" type="image/svg+xml">
+<link rel="alternate" hreflang="ko" href="https://spro1.github.io/taskhouse/ko.html">
+<link rel="alternate" hreflang="x-default" href="https://spro1.github.io/taskhouse/">
+<link rel="canonical" href="https://spro1.github.io/taskhouse/">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://spro1.github.io/taskhouse/">
+<meta property="og:image" content="https://spro1.github.io/taskhouse/images/screenshot-board.png">
+<meta property="og:image:width" content="1440">
+<meta property="og:image:height" content="900">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://spro1.github.io/taskhouse/images/screenshot-board.png">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Taskhouse","applicationCategory":"BusinessApplication","operatingSystem":"Linux (Docker, Podman)","license":"https://www.apache.org/licenses/LICENSE-2.0","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"url":"https://spro1.github.io/taskhouse/","downloadUrl":"https://github.com/spro1/taskhouse/releases/latest","codeRepository":"https://github.com/spro1/taskhouse","description":"Open-source, self-hosted issue tracker and Jira alternative with backlog, sprints and boards, SSO, MCP and air-gapped install.","inLanguage":["en","ko"],"screenshot":"https://spro1.github.io/taskhouse/images/screenshot-board.png"}</script>
+<link rel="stylesheet" href="style.css?v=__V__">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#"><img src="images/logo.svg" alt="">Taskhouse</a>
+    <nav class="links">
+      <a class="opt" href="#features">Features</a>
+      <a class="opt" href="#security">Data &amp; security</a>
+      <a class="opt" href="#install">Install</a>
+      <a class="opt" href="#faq">FAQ</a>
+      <a href="https://github.com/spro1/taskhouse">GitHub</a>
+      <a class="lang" href="ko.html" hreflang="ko">한국어</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="wrap">
+      <span class="eyebrow">Open source · Apache-2.0 · No user limits</span>
+      <h1>Your team's work,<br><span class="grad">on your own server</span></h1>
+      <p class="lead">Taskhouse is an issue tracker that small organizations and teams install on their own server. Backlog, sprints and a board in one place, without sending your work outside your network.</p>
+      <div class="cta">
+        <a class="btn primary" href="#install">Install</a>
+        <a class="btn" href="https://github.com/spro1/taskhouse">View on GitHub</a>
+      </div>
+      <div class="badges"><span>Docker · Podman</span><span>Air-gapped install</span><span>Shares accounts with Pagehouse</span><span>English · 한국어</span></div>
+      <img class="shot" src="images/screenshot-board.png" width="1440" height="900" alt="A Taskhouse sprint board with To do, In progress, In review and Done columns">
+    </div>
+  </section>
+
+  <section class="block soft">
+    <div class="wrap">
+      <h2>Built for teams like these</h2>
+      <p class="sub">If an issue tracker has meant contracts, seat counts and approvals to store data outside.</p>
+      <div class="who">
+        <div class="card"><h3>Organizations of 5 to 100</h3><p>No license fees and no counting seats at every renewal.</p></div>
+        <div class="card"><h3>Work that can't leave</h3><p>Security policy, customer requirements or an air-gapped network rule out SaaS. Everything stays on your server.</p></div>
+        <div class="card"><h3>No one to run it full time</h3><p>Three containers on one server. Install, upgrade and backup are one script each.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="features">
+    <div class="wrap">
+      <h2>What a tracker people like to use needs</h2>
+      <p class="sub">Made so that anyone used to Jira feels at home.</p>
+      <div class="grid">
+        <div class="card"><div class="ico">📋</div><h3>Issues</h3><p>Epics, stories, tasks, bugs and sub-tasks with the hierarchy checked, rich-text descriptions and comments with <code>@</code> mentions, links, attachments, watching and full history. Two people editing different fields never overwrite each other.</p></div>
+        <div class="card"><div class="ico">🏃</div><h3>Scrum</h3><p>A backlog you rank by dragging, sprints that carry unfinished issues over, and a board where dragging a card changes its status. Quick filters by text, assignee and "only mine".</p></div>
+        <div class="card"><div class="ico">🔀</div><h3>Workflows</h3><p>Free movement by default. Statuses and transitions with who may use them, conditions (no open blockers, sub-tasks done, required fields) and what happens afterwards.</p></div>
+        <div class="card"><div class="ico">👆</div><h3>Fast to use</h3><p>Issues open in a side panel, <code>C</code> creates an issue anywhere, ⌘K jumps to a key or searches. Changes by others appear live.</p></div>
+        <div class="card"><div class="ico">🔎</div><h3>Search</h3><p>TQL, a JQL subset with <code>CHANGED</code>, <code>linked</code> and <code>membersOf()</code>, and filter chips on the same engine. Saved filters. What you can't see never appears.</p></div>
+        <div class="card"><div class="ico">🔒</div><h3>Permissions</h3><p>Four project roles for people or groups and three visibility levels. Issues outside your permissions answer 404 on every path.</p></div>
+        <div class="card"><div class="ico">🔔</div><h3>Notifications</h3><p>In the app, email digests, signed webhooks with retries, and Slack, Mattermost or Teams. Only ever to people who may see the issue.</p></div>
+        <div class="card"><div class="ico">🤖</div><h3>AI agents</h3><p>A built-in MCP server: agents search, create, update, move and comment on issues with a personal API token and exactly your permissions.</p></div>
+        <div class="card"><div class="ico">🔑</div><h3>Sign-in</h3><p>Accounts from invite links, or OpenID Connect SSO turned on from the admin screen (tested with Keycloak). Accounts can be shared with Pagehouse, the team wiki.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block soft">
+    <div class="wrap">
+      <div class="screens" role="group" aria-label="Screenshots">
+        <input type="radio" name="shot" id="shot-dark" checked>
+        <input type="radio" name="shot" id="shot-search">
+        <div class="screen-tabs">
+          <label for="shot-dark">Dark theme</label>
+          <label for="shot-search">Backlog and issue panel</label>
+        </div>
+        <img class="screen screen-dark" src="images/screenshot-dark.png" width="1440" height="900" alt="The board in the dark theme" loading="lazy">
+        <img class="screen screen-search" src="images/screenshot-panel.png" width="1440" height="900" alt="The backlog with an issue open in the side panel" loading="lazy">
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="security">
+    <div class="wrap">
+      <h2>Your data never leaves your server</h2>
+      <p class="sub">No external fonts, CDNs or telemetry. The only outbound requests are features you turn on.</p>
+      <table class="facts">
+        <tr><th>Where data lives</th><td>PostgreSQL and a file volume, all on your server. Outbound requests only for the SSO, email and webhooks you configure.</td></tr>
+        <tr><th>No internet</th><td>Install and upgrade from an offline bundle that carries the container images.</td></tr>
+        <tr><th>Nothing lost</th><td>Automatic daily backups, plus one before every upgrade and restore. Every change to an issue stays in its history.</td></tr>
+        <tr><th>Security</th><td>Sign-in throttling, an audit log, encrypted SSO and webhook secrets, a strict Content-Security-Policy, and webhooks that never reach loopback or link-local addresses.</td></tr>
+        <tr><th>Leaving</th><td>Export a whole project as JSON (descriptions, comments, links and history) and issue lists as CSV.</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="block soft" id="install">
+    <div class="wrap">
+      <h2>One server, one command</h2>
+      <p class="sub">A Linux server (amd64 or arm64) with Docker 24+ or Podman 4+.</p>
+      <div class="tabs">
+        <div class="card">
+          <h3>Release bundle <span class="tag">Works offline</span></h3>
+          <p>Download the bundle and <code>SHA256SUMS</code> from the releases page. The bundle carries the images, so nothing is downloaded.</p>
+<pre class="cmd"><code>sha256sum -c SHA256SUMS --ignore-missing
+tar xzf taskhouse-&lt;version&gt;-amd64.tar.gz &amp;&amp; cd taskhouse-&lt;version&gt;
+scripts/install.sh images.tar</code></pre>
+        </div>
+        <div class="card">
+          <h3>From source</h3>
+          <p>Builds the images on the server, writes the database password and encryption key, and starts the service.</p>
+<pre class="cmd"><code>git clone https://github.com/spro1/taskhouse.git &amp;&amp; cd taskhouse
+scripts/install.sh</code></pre>
+        </div>
+        <div class="card">
+          <h3>Next to Pagehouse</h3>
+          <p>Already running Pagehouse on this server? Taskhouse joins its database and its accounts.</p>
+<pre class="cmd"><code>scripts/install.sh --share-with /opt/pagehouse images.tar</code></pre>
+        </div>
+      </div>
+      <p class="note">The installer prints a one-time setup token for the first account, which becomes the administrator. See the <a href="https://github.com/spro1/taskhouse/blob/main/docs/install.md">install guide</a> and the <a href="https://github.com/spro1/taskhouse/blob/main/docs/upgrading.md">upgrade guide</a>.</p>
+    </div>
+  </section>
+
+  <section class="block soft" id="faq">
+    <div class="wrap">
+      <h2>Questions</h2>
+      <details><summary>Is it really free?</summary><p>Yes. It's open source under Apache-2.0 with no user limits. You only pay for the server.</p></details>
+      <details><summary>Does it need internet access?</summary><p>No. Installing from the release bundle, using and upgrading all work without it.</p></details>
+      <details><summary>Can people sign in with company accounts (SSO)?</summary><p>Yes, with OpenID Connect, turned on in Admin → People &amp; SSO. It has been tested with Keycloak, and provider groups and admins come along.</p></details>
+      <details><summary>Does it work with a wiki?</summary><p>Yes. <a href="https://spro1.github.io/pagehouse/">Pagehouse</a> (team wiki) is a separate product, but installed into the same database it shares Taskhouse's accounts. One sign-in opens both and each links to the other. People, groups and SSO settings exist once; roles and permissions stay per product. See the <a href="https://github.com/spro1/taskhouse/blob/main/docs/install.md#using-taskhouse-together-with-pagehouse">install guide</a>.</p></details>
+      <details><summary>Can we move from Jira?</summary><p>There is no Jira importer yet. Issues can be created over the REST API or MCP.</p></details>
+      <details><summary>Found a problem or have an idea?</summary><p>Open a <a href="https://github.com/spro1/taskhouse/issues">GitHub issue</a>. Report security issues privately, as described in <a href="https://github.com/spro1/taskhouse/blob/main/SECURITY.md">SECURITY.md</a>.</p></details>
+    </div>
+  </section>
+
+  <section class="final">
+    <div class="wrap">
+      <h2>Install it today, plan the sprint tomorrow</h2>
+      <p class="sub" style="margin: 0 auto 28px">The first account becomes the administrator. Send invite links and your team is in.</p>
+      <div class="cta">
+        <a class="btn primary" href="#install">Install</a>
+        <a class="btn" href="https://github.com/spro1/taskhouse/releases">See releases</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© Taskhouse contributors · Apache-2.0</span>
+    <span class="tm">Jira is a trademark of Atlassian. Taskhouse is not affiliated with or endorsed by Atlassian.</span>
+    <div class="right">
+      <a href="https://github.com/spro1/taskhouse">GitHub</a>
+      <a href="https://spro1.github.io/pagehouse/">Pagehouse</a>
+      <a href="ko.html" hreflang="ko">한국어</a>
+    </div>
+  </div>
+</footer>
+<script src="copy.js?v=__V__"></script>
+</body>
+</html>

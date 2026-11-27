@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Taskhouse · 우리 서버에 설치하는 이슈 트래커</title>
+<meta name="description" content="Taskhouse는 소규모 조직과 팀이 자기 서버에 설치해 쓰는 오픈소스 이슈 트래커입니다. 백로그, 스프린트, 보드, SSO, AI 에이전트용 MCP, 폐쇄망 설치를 지원합니다.">
+<meta property="og:title" content="Taskhouse · 우리 서버에 설치하는 이슈 트래커">
+<meta property="og:description" content="업무를 회사 밖으로 내보내지 않는 오픈소스 이슈 트래커. 서버 한 대, 명령 한 줄로 설치합니다.">
+<link rel="icon" href="images/logo.svg" type="image/svg+xml">
+<link rel="alternate" hreflang="en" href="https://spro1.github.io/taskhouse/">
+<link rel="alternate" hreflang="x-default" href="https://spro1.github.io/taskhouse/">
+<link rel="canonical" href="https://spro1.github.io/taskhouse/ko.html">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://spro1.github.io/taskhouse/ko.html">
+<meta property="og:image" content="https://spro1.github.io/taskhouse/images/screenshot-board.png">
+<meta property="og:image:width" content="1440">
+<meta property="og:image:height" content="900">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://spro1.github.io/taskhouse/images/screenshot-board.png">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Taskhouse","applicationCategory":"BusinessApplication","operatingSystem":"Linux (Docker, Podman)","license":"https://www.apache.org/licenses/LICENSE-2.0","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"url":"https://spro1.github.io/taskhouse/","downloadUrl":"https://github.com/spro1/taskhouse/releases/latest","codeRepository":"https://github.com/spro1/taskhouse","description":"우리 서버에 설치하는 오픈소스 이슈 트래커이자 Jira 대안. 백로그, 스프린트, 보드, SSO, MCP, 폐쇄망 설치.","inLanguage":["en","ko"],"screenshot":"https://spro1.github.io/taskhouse/images/screenshot-board.png"}</script>
+<link rel="stylesheet" href="style.css?v=__V__">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#"><img src="images/logo.svg" alt="">Taskhouse</a>
+    <nav class="links">
+      <a class="opt" href="#features">기능</a>
+      <a class="opt" href="#security">데이터와 보안</a>
+      <a class="opt" href="#install">설치</a>
+      <a class="opt" href="#faq">FAQ</a>
+      <a href="https://github.com/spro1/taskhouse">GitHub</a>
+      <a class="lang" href="index.html" hreflang="en">English</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="wrap">
+      <span class="eyebrow">오픈소스 · Apache-2.0 · 사용자 수 제한 없음</span>
+      <h1>팀의 업무를<br><span class="grad">우리 서버 안에서</span></h1>
+      <p class="lead">Taskhouse는 소규모 조직과 팀이 자기 서버에 설치해 쓰는 이슈 트래커입니다. 백로그, 스프린트, 보드를 한곳에 두고, 업무 데이터를 회사 밖으로 내보내지 않습니다.</p>
+      <div class="cta">
+        <a class="btn primary" href="#install">설치하기</a>
+        <a class="btn" href="https://github.com/spro1/taskhouse">GitHub에서 보기</a>
+      </div>
+      <div class="badges"><span>Docker · Podman</span><span>폐쇄망 설치</span><span>Pagehouse와 계정 공유</span><span>한국어 · English</span></div>
+      <img class="shot" src="images/screenshot-board.png" width="1440" height="900" alt="할 일, 진행 중, 리뷰 중, 완료 열이 있는 Taskhouse 스프린트 보드">
+    </div>
+  </section>
+
+  <section class="block soft">
+    <div class="wrap">
+      <h2>이런 팀을 위해 만들었습니다</h2>
+      <p class="sub">이슈 트래커 하나 쓰려 해도 계약, 사용자 수, 외부 저장 승인이 걸렸다면.</p>
+      <div class="who">
+        <div class="card"><h3>5~100명 규모의 조직</h3><p>라이선스 비용도, 갱신 때마다 사용자 수를 세는 일도 없습니다.</p></div>
+        <div class="card"><h3>밖으로 나가면 안 되는 업무</h3><p>보안 정책, 고객 요구, 폐쇄망 때문에 SaaS를 쓸 수 없어도 됩니다. 모든 것이 우리 서버에 있습니다.</p></div>
+        <div class="card"><h3>전담 운영 인력이 없는 팀</h3><p>서버 한 대에 컨테이너 셋. 설치, 업그레이드, 백업이 각각 스크립트 하나입니다.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="features">
+    <div class="wrap">
+      <h2>즐겨 쓰는 트래커에 필요한 것</h2>
+      <p class="sub">Jira에 익숙한 사람이면 바로 쓸 수 있게 만들었습니다.</p>
+      <div class="grid">
+        <div class="card"><div class="ico">📋</div><h3>이슈</h3><p>에픽, 스토리, 작업, 버그, 하위 작업(계층 검사), 서식 있는 설명과 댓글, <code>@</code>멘션, 연결, 첨부, 지켜보기, 전체 변경 이력. 두 사람이 다른 필드를 고치면 서로 덮어쓰지 않습니다.</p></div>
+        <div class="card"><div class="ico">🏃</div><h3>스크럼</h3><p>끌어서 순서를 바꾸는 백로그, 완료하면 남은 이슈를 옮기는 스프린트, 카드를 끌면 상태가 바뀌는 보드. 검색, 담당자, 내 이슈만 빠른 필터.</p></div>
+        <div class="card"><div class="ico">🔀</div><h3>워크플로</h3><p>기본은 자유 이동. 상태와 전이마다 누가 쓸 수 있는지, 조건(열린 차단 이슈 없음, 하위 작업 완료, 필수 필드), 이동 후 처리를 정합니다.</p></div>
+        <div class="card"><div class="ico">👆</div><h3>빠른 사용</h3><p>이슈는 오른쪽 패널에 열리고, 어디서나 <code>C</code>로 이슈를 만들고, ⌘K로 키 이동과 검색. 다른 사람의 변경이 바로 보입니다.</p></div>
+        <div class="card"><div class="ico">🔎</div><h3>검색</h3><p>JQL 부분집합인 TQL(<code>CHANGED</code>, <code>linked</code>, <code>membersOf()</code> 등)과 필터 칩이 같은 엔진. 저장된 필터. 한국어 조사 처리. 볼 수 없는 이슈는 나오지 않습니다.</p></div>
+        <div class="card"><div class="ico">🔒</div><h3>권한</h3><p>사람이나 그룹에 주는 프로젝트 역할 4종과 공개 범위 3종. 권한 밖 이슈는 모든 경로에서 404입니다.</p></div>
+        <div class="card"><div class="ico">🔔</div><h3>알림</h3><p>앱 내 알림, 메일 묶음, 서명하고 재시도하는 웹훅, Slack, Mattermost, Teams. 볼 권한이 있는 사람에게만 갑니다.</p></div>
+        <div class="card"><div class="ico">🤖</div><h3>AI 에이전트</h3><p>내장 MCP 서버: 개인 API 토큰으로 이슈 검색, 생성, 수정, 상태 이동, 댓글. 권한은 토큰 주인과 같습니다.</p></div>
+        <div class="card"><div class="ico">🔑</div><h3>로그인</h3><p>초대 링크로 만드는 계정, 또는 관리 화면에서 켜는 OpenID Connect SSO(Keycloak으로 확인). 팀 위키 Pagehouse와 계정을 공유할 수 있습니다.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block soft">
+    <div class="wrap">
+      <div class="screens" role="group" aria-label="화면">
+        <input type="radio" name="shot" id="shot-dark" checked>
+        <input type="radio" name="shot" id="shot-search">
+        <div class="screen-tabs">
+          <label for="shot-dark">어두운 테마</label>
+          <label for="shot-search">백로그와 이슈 패널</label>
+        </div>
+        <img class="screen screen-dark" src="images/screenshot-dark.png" width="1440" height="900" alt="어두운 테마의 보드" loading="lazy">
+        <img class="screen screen-search" src="images/screenshot-panel.png" width="1440" height="900" alt="이슈를 오른쪽 패널에 연 백로그" loading="lazy">
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="security">
+    <div class="wrap">
+      <h2>데이터는 우리 서버를 떠나지 않습니다</h2>
+      <p class="sub">외부 폰트, CDN, 사용 통계가 없습니다. 밖으로 나가는 요청은 직접 켠 기능뿐입니다.</p>
+      <table class="facts">
+        <tr><th>데이터 위치</th><td>PostgreSQL과 파일 볼륨, 모두 우리 서버. 밖으로 나가는 요청은 설정한 SSO, 메일, 웹훅뿐입니다.</td></tr>
+        <tr><th>인터넷 없이</th><td>컨테이너 이미지가 든 오프라인 번들로 설치하고 업그레이드합니다.</td></tr>
+        <tr><th>잃어버리지 않음</th><td>매일 자동 백업, 업그레이드와 복원 전에도 한 번씩. 이슈의 모든 변경은 이력에 남습니다.</td></tr>
+        <tr><th>보안</th><td>로그인 시도 제한, 감사 로그, 암호화된 SSO·웹훅 비밀값, 엄격한 Content-Security-Policy, 루프백·링크 로컬 주소로 가지 않는 웹훅.</td></tr>
+        <tr><th>떠날 때</th><td>프로젝트 전체를 JSON(설명, 댓글, 연결, 이력 포함)으로, 이슈 목록을 CSV로 내보냅니다.</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="block soft" id="install">
+    <div class="wrap">
+      <h2>서버 한 대, 명령 한 줄</h2>
+      <p class="sub">Docker 24+ 또는 Podman 4+가 있는 Linux 서버(amd64, arm64).</p>
+      <div class="tabs">
+        <div class="card">
+          <h3>릴리스 번들 <span class="tag">인터넷 없이</span></h3>
+          <p>릴리스 페이지에서 번들과 <code>SHA256SUMS</code>를 받습니다. 번들에 이미지가 들어 있어 아무것도 내려받지 않습니다.</p>
+<pre class="cmd"><code>sha256sum -c SHA256SUMS --ignore-missing
+tar xzf taskhouse-&lt;version&gt;-amd64.tar.gz &amp;&amp; cd taskhouse-&lt;version&gt;
+scripts/install.sh images.tar</code></pre>
+        </div>
+        <div class="card">
+          <h3>소스에서</h3>
+          <p>서버에서 이미지를 빌드하고, DB 비밀번호와 암호화 키를 만들고, 서비스를 시작합니다.</p>
+<pre class="cmd"><code>git clone https://github.com/spro1/taskhouse.git &amp;&amp; cd taskhouse
+scripts/install.sh</code></pre>
+        </div>
+        <div class="card">
+          <h3>Pagehouse 옆에</h3>
+          <p>이 서버에서 Pagehouse를 이미 쓰고 있다면, Taskhouse가 그 데이터베이스와 계정을 함께 씁니다.</p>
+<pre class="cmd"><code>scripts/install.sh --share-with /opt/pagehouse images.tar</code></pre>
+        </div>
+      </div>
+      <p class="note">설치가 끝나면 첫 계정용 setup token이 출력되고, 그 계정이 관리자가 됩니다. <a href="https://github.com/spro1/taskhouse/blob/main/docs/install.ko.md">설치 안내</a>와 <a href="https://github.com/spro1/taskhouse/blob/main/docs/upgrading.ko.md">업그레이드 안내</a>를 보세요.</p>
+    </div>
+  </section>
+
+  <section class="block soft" id="faq">
+    <div class="wrap">
+      <h2>자주 묻는 질문</h2>
+      <details><summary>정말 무료인가요?</summary><p>네. Apache-2.0 라이선스의 오픈소스이고 사용자 수 제한도 없습니다. 서버 비용만 듭니다.</p></details>
+      <details><summary>인터넷이 필요한가요?</summary><p>아니요. 릴리스 번들로 설치하면 설치, 사용, 업그레이드 모두 인터넷 없이 됩니다.</p></details>
+      <details><summary>회사 계정(SSO)으로 로그인할 수 있나요?</summary><p>네. OpenID Connect를 관리 → 사람과 SSO에서 켭니다. Keycloak으로 확인했고, IdP 그룹과 관리자도 반영됩니다.</p></details>
+      <details><summary>위키와 함께 쓸 수 있나요?</summary><p>네. <a href="https://spro1.github.io/pagehouse/ko.html">Pagehouse</a>(팀 위키)는 별도 제품이지만 같은 데이터베이스에 설치하면 Taskhouse와 계정을 공유합니다. 한 번 로그인하면 둘 다 열리고 서로 링크됩니다. 사람, 그룹, SSO 설정은 한 벌이고, 역할과 권한은 제품마다 따로입니다. <a href="https://github.com/spro1/taskhouse/blob/main/docs/install.ko.md#pagehouse와-함께-쓰기">설치 안내</a>를 보세요.</p></details>
+      <details><summary>Jira에서 옮겨올 수 있나요?</summary><p>아직 Jira 가져오기 기능은 없습니다. REST API나 MCP로 이슈를 만들 수 있습니다.</p></details>
+      <details><summary>문제를 찾았거나 제안이 있나요?</summary><p><a href="https://github.com/spro1/taskhouse/issues">GitHub 이슈</a>로 알려 주세요. 보안 문제는 <a href="https://github.com/spro1/taskhouse/blob/main/SECURITY.md">SECURITY.md</a>에 적힌 대로 비공개로 알려 주세요.</p></details>
+    </div>
+  </section>
+
+  <section class="final">
+    <div class="wrap">
+      <h2>오늘 설치하고, 내일 스프린트를 시작하세요</h2>
+      <p class="sub" style="margin: 0 auto 28px">첫 계정이 관리자가 됩니다. 초대 링크를 보내면 팀이 들어옵니다.</p>
+      <div class="cta">
+        <a class="btn primary" href="#install">설치하기</a>
+        <a class="btn" href="https://github.com/spro1/taskhouse/releases">릴리스 보기</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© Taskhouse contributors · Apache-2.0</span>
+    <span class="tm">Jira는 Atlassian의 상표입니다. Taskhouse는 Atlassian과 제휴하거나 보증받은 프로젝트가 아닙니다.</span>
+    <div class="right">
+      <a href="https://github.com/spro1/taskhouse">GitHub</a>
+      <a href="https://spro1.github.io/pagehouse/ko.html">Pagehouse</a>
+      <a href="index.html" hreflang="en">English</a>
+    </div>
+  </div>
+</footer>
+<script src="copy.js?v=__V__"></script>
+</body>
+</html>
